@@ -747,9 +747,10 @@ function finishTacticalDemo() {
 function playTacticalDemo() {
   stopTacticalDemo(false)
 
-  // 若有"3D聚焦"的待恢复视角，先取消，避免和演示抢镜头
+  // 若此前点过"3D聚焦"，它记下的"聚焦前视角"要留到演示结束时用：
+  // 取消聚焦自己的延迟恢复（避免演示中抢镜头），但把视角数据交给演示
+  const viewBeforeFocus = focusReturnView
   focusReturnToken += 1
-  focusReturnView = null
 
   const points = getTacticalRoute()
   if (points.length < 2) {
@@ -758,6 +759,13 @@ function playTacticalDemo() {
   }
 
   saveCameraState()
+  // 快照里存的是"当前（可能是聚焦后的）视角"；若之前有聚焦前视角，
+  // 用覆盖它，这样点停止后回到的是最初的位置
+  if (viewBeforeFocus && tacticalDemo.cameraSnapshot) {
+    tacticalDemo.cameraSnapshot.position.copy(viewBeforeFocus.position)
+    tacticalDemo.cameraSnapshot.target.copy(viewBeforeFocus.target)
+    focusReturnView = null
+  }
   pauseUserControls()
 
   // 一整段连贯讲解（不再按阶段切成一段段），用估算时长给动画配速
@@ -864,6 +872,10 @@ async function init() {
       const speechList = buildPreloadSpeechList()
       aiGuide.preloadCommonSpeeches(speechList.slice(0, 2)).then(() => {
         aiGuide.preloadCommonSpeeches(speechList.slice(2))
+      }).then(() => {
+        // 初始化语音都补齐后再预取方案讲词：否则一堆请求挤在一起，
+        // 用户这时点"3D聚焦"会排在队尾，听起来像"语音被卡掉"
+        prefetchTacticalSpeech()
       }).catch(() => {})
       refreshVoiceUi()
     }
@@ -1900,6 +1912,9 @@ function buildTacticalStageDescs() {
  */
 function prefetchTacticalSpeech() {
   if (!aiGuide?.prefetchSpeech || !state.currentPhysics) return
+  // 初始化预加载还在跑：先不抢接口（等它结束会再调一次），
+  // 否则用户此时点聚焦/演示，请求会排在后台任务后面，听起来像"语音卡掉"
+  if (aiGuide.preloadInFlight) return
   for (const desc of buildTacticalStageDescs()) {
     aiGuide.prefetchSpeech(desc)
   }
