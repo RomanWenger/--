@@ -395,6 +395,27 @@ function showOnlyRouteLayer(name) {
   }
 }
 
+/**
+ * 统一控制"救援路径"相关元素的显隐：路径线、路径上的选点圆环、起终点旗标。
+ * 重新训练回放时隐藏它们，画面上只留 AI 从 0 开始学习的轨迹。
+ */
+function setRescuePathVisible(visible) {
+  if (sceneManager?.scene?.traverse) {
+    sceneManager.scene.traverse(object => {
+      if (object.userData?.isRescuePath) object.visible = visible
+    })
+  }
+
+  if (visible) {
+    showOnlyRouteLayer('plan')
+  } else {
+    for (const layer of Object.values(routeLayers)) layer.visible = false
+  }
+
+  terrain?.setHighlightVisible?.(visible)
+  terrain?.setMarkersVisible?.(visible)
+}
+
 let pathUpdateTimer = null
 function schedulePathUpdate(delay = 150) {
   return new Promise(resolve => {
@@ -1253,6 +1274,7 @@ function setupUI() {
     }
     if (windParticles?.setDisplayIntensity) windParticles.setDisplayIntensity(1.0)
     if (pathVisualizer?.pathMesh) pathVisualizer.pathMesh.visible = true
+    setRescuePathVisible(true)
   }
 
   stageBtns.forEach(btn => {
@@ -1344,6 +1366,8 @@ function setupUI() {
     if (pathVisualizer?.pathMesh) {
       pathVisualizer.pathMesh.visible = false
     }
+    // 只保留"从 0 开始学习"的过程：隐藏救援路径线、选点圆环与起终点旗标
+    setRescuePathVisible(false)
 
     const finishTrainingReplay = () => {
       if (runToken !== trainingRunToken) return
@@ -1355,6 +1379,7 @@ function setupUI() {
       if (windParticles?.setDisplayIntensity) windParticles.setDisplayIntensity(1.0)
       if (pathVisualizer?.pathMesh) pathVisualizer.pathMesh.visible = true
       showOnlyRouteLayer('plan')
+      setRescuePathVisible(true)
     }
     const playQueuedTraining = () => {
       if (runToken !== trainingRunToken || trainingReplayRunning || !trainingReplayQueue.length) return
@@ -1467,6 +1492,7 @@ function setupUI() {
       if (pathVisualizer?.pathMesh) {
         pathVisualizer.pathMesh.visible = true
       }
+      setRescuePathVisible(true)
       trainingMode = TRAINING_MODES.IDLE
       const note = document.getElementById('tp-note')
       if (note) note.innerHTML = `<strong style="color:#ef4444">训练失败：</strong> ${e.message || '未知错误'}`

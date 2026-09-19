@@ -36,6 +36,8 @@ export class PathVisualizer {
     }
 
     const group = new THREE.Group()
+    // 标记为"救援路径"：重新训练回放等场景需要整体隐藏它
+    group.userData.isRescuePath = true
 
     // 一条连续、去重、贴地的细线，而不是每段独立立体管
     const line = this.buildRouteLine(worldPoints, options.color ?? 0x86efac)

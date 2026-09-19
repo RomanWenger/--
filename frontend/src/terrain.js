@@ -1046,6 +1046,23 @@ export class Terrain {
     return group
   }
 
+  /**
+   * 显示/隐藏路径上的"选点"金色圆环（重新训练回放时用）。
+   */
+  setHighlightVisible(visible) {
+    for (const cell of this.highlightCells || []) {
+      cell.visible = visible
+    }
+  }
+
+  /**
+   * 显示/隐藏起点/终点旗标。
+   */
+  setMarkersVisible(visible) {
+    if (this.startMarker) this.startMarker.visible = visible
+    if (this.goalMarker) this.goalMarker.visible = visible
+  }
+
   highlightPath(path, terrainData) {
     const targetPositions = []
 
