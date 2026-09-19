@@ -702,6 +702,8 @@ function stopTacticalDemo(restore = true) {
     tacticalDemo.startTimer = null
   }
   if (aiGuide) aiGuide.onSpeechPlaying = null
+  // 停止演示时语音也要停：否则画面已复位，讲解还在继续念
+  aiGuide?.stopSpeech?.()
 
   if (tacticalDemo.rafId) {
     cancelAnimationFrame(tacticalDemo.rafId)
@@ -1874,6 +1876,37 @@ function getTacticalMetrics() {
 }
 
 /**
+ * 战术方案三段讲解词（第 2 段随物理数据变化）。
+ * 抽成函数是为了在路径更新后就能提前合成语音，点"3D聚焦"时直接命中缓存。
+ */
+function buildTacticalStageDescs() {
+  const metrics = getTacticalMetrics()
+  const hazard = state.hazard || {}
+  const risk = finiteNumber(hazard.peak_scale, state.windSpeed, 0.5)
+  const crossSteps = metrics.crossSteps
+
+  return [
+    '从吉隆口岸前指出发，避开主沟直冲面，沿山谷东侧等高线低坡推进，保持机械能耗最低。',
+    crossSteps > 0
+      ? `前方泥石流流动强度 ${risk.toFixed(2)}，选择沟道收窄且流速较慢的基岩带快速横穿，切忌逆流停留。`
+      : '当前冲沟流势较缓，保持匀速横切，注意避让滚石区。',
+    '穿越冲沟后切入被困人员所在安全阶地，建立临时生命支持与撤离锚点，完成救援闭环。'
+  ]
+}
+
+/**
+ * 路径/物理数据一更新就提前合成方案讲词与 3D 演示讲词，
+ * 这样点"3D聚焦"或"在 3D 地图上演示"时几乎不用等合成。
+ */
+function prefetchTacticalSpeech() {
+  if (!aiGuide?.prefetchSpeech || !state.currentPhysics) return
+  for (const desc of buildTacticalStageDescs()) {
+    aiGuide.prefetchSpeech(desc)
+  }
+  aiGuide.prefetchSpeech(buildTacticalNarration())
+}
+
+/**
  * 生成战术级救援方案：顶部战术指标 + 三阶段战术步骤 + 单阶段 3D 聚焦按钮
  */
 function generateTacticalPlan() {
@@ -1919,22 +1952,22 @@ function generateTacticalPlan() {
   const wp2 = chartWorldPoints[1] || wp1.clone()
   const wp3 = chartWorldPoints[2] || wp2.clone()
 
+  const stageDescs = buildTacticalStageDescs()
+
   const stages = [
     {
       title: '第一阶段：口岸前指撤离与山麓缓坡机动 (0 - 300m)',
-      desc: '从吉隆口岸前指出发，避开主沟直冲面，沿山谷东侧等高线低坡推进，保持机械能耗最低。',
+      desc: stageDescs[0],
       target: wp1
     },
     {
       title: '第二阶段：泥石流主冲沟窄断面横切 (300 - 650m)',
-      desc: crossSteps > 0
-        ? `前方泥石流流动强度 ${risk.toFixed(2)}，选择沟道收窄且流速较慢的基岩带快速横穿，切忌逆流停留。`
-        : '当前冲沟流势较缓，保持匀速横切，注意避让滚石区。',
+      desc: stageDescs[1],
       target: wp2
     },
     {
       title: '第三阶段：切入受灾阶地与人员快速转运 (650m - 终点)',
-      desc: '穿越冲沟后切入被困人员所在安全阶地，建立临时生命支持与撤离锚点，完成救援闭环。',
+      desc: stageDescs[2],
       target: wp3
     }
   ]
@@ -2430,6 +2463,9 @@ async function updatePath() {
     // 更新实时物理参数面板
     state.currentPhysics = result.physics || {}
     renderPhysicsPanel(state.currentPhysics)
+
+    // 方案讲词 / 3D 演示讲词提前合成：点聚焦或演示时直接命中缓存
+    prefetchTacticalSpeech()
   } catch (err) {
     if (version !== pathRequestVersion) return
     console.error('Failed to update path:', err)
