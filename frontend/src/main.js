@@ -1462,7 +1462,8 @@ function setupUI() {
       if (!trainingReplay) {
         trainingReplay = new TrainingReplay(routeLayers.training, glbTerrain)
       }
-      let lastSpokenStage = -1
+      // 开场已经播过"阶段 0"的讲解，这里标记为已播，避免回放一开始又念一遍
+      let lastSpokenStage = 0
       trainingReplay.onStage = (stage) => {
         const note = document.getElementById('tp-note')
         if (note) {
@@ -1926,6 +1927,11 @@ function generateTacticalPlan() {
       target: wp3
     }
   ]
+
+  // 提前把三段讲解合成好放进缓存：点"3D聚焦"时就不用现场等合成
+  for (const stage of stages) {
+    if (stage.desc) aiGuide?.prefetchSpeech?.(stage.desc)
+  }
 
   const stepsEl = document.getElementById('rescue-plan-steps')
   if (stepsEl) {

@@ -714,6 +714,11 @@ export class AIGuide {
       return false
     }
 
+    // 同一段话正在播时不要重头再播（否则会听到开头被念两遍）
+    if (this._isPlaying && this.currentMessage === text && !interrupt) {
+      return true
+    }
+
     this.stopSpeech()
     this.currentMessage = text
     this._isPlaying = true
