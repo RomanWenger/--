@@ -8,6 +8,14 @@
  *
  * 每关回答后给出对应的物理解释，并把选择结果传给仿真模型。
  */
+/**
+ * 答题反馈语音（固定文案）。导出给初始化预加载使用：答题时直接命中缓存、秒出声。
+ */
+export const LESSON_FEEDBACK_SPEECHES = [
+  '判断正确。现在我们把这条知识应用到救援仿真中。',
+  '这个选择存在风险。我们一起看看地形和物理规律。'
+]
+
 export class InteractiveLesson {
   constructor({ panel, aiGuide, onDecision }) {
     this.panel = panel
@@ -184,9 +192,7 @@ export class InteractiveLesson {
       button.disabled = true
     })
 
-    const speakText = option.correct
-      ? '判断正确。现在我们把这条知识应用到救援仿真中。'
-      : '这个选择存在风险。我们一起看看地形和物理规律。'
+    const speakText = LESSON_FEEDBACK_SPEECHES[option.correct ? 0 : 1]
 
     if (option.correct) {
       this.score += 1

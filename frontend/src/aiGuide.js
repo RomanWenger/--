@@ -824,8 +824,10 @@ export class AIGuide {
         return speakEnded(await this._playBlobAudio(blob, version))
       }
 
-      // 长段落（如 3D 演示讲解）直接走短句队列：整段合成要等很久，逐句合成快得多
-      if (options.preferSentences && this._audioContext) {
+      // 长文本直接走短句队列：整段合成约 0.14 秒/字（40 字要 ~6 秒），
+      // 而逐句合成 1~2 秒就能出声；短文本才值得用流式端点。
+      const preferQueue = options.preferSentences === true || text.length > 18
+      if (preferQueue && this._audioContext) {
         const presetSentences = this._splitSpeechText(text)
         if (presetSentences.length > 1) {
           this._sentenceAbortController = new AbortController()
@@ -841,14 +843,16 @@ export class AIGuide {
         }
       }
 
-      // 3. 流式端点：首包即播
-      const streamResult = await this._playStreamedAudio(text, version)
-      if (version !== this._queueVersion) return false
-      if (streamResult.ok) return speakEnded(true)
-      // 已经出过声就不再换链路重播，避免同一段听两遍
-      if (streamResult.started) {
-        console.warn('[TTS] 流式播放中断，本段不再重播')
-        return speakEnded(false)
+      // 3. 流式端点：整段合成，只有短文本才划算（长文本整段要等好几秒）
+      if (text.length <= 18) {
+        const streamResult = await this._playStreamedAudio(text, version)
+        if (version !== this._queueVersion) return false
+        if (streamResult.ok) return speakEnded(true)
+        // 已经出过声就不再换链路重播，避免同一段听两遍
+        if (streamResult.started) {
+          console.warn('[TTS] 流式播放中断，本段不再重播')
+          return speakEnded(false)
+        }
       }
 
       // 4. 短句队列：流式不可用时逐句合成，首句就出声
@@ -929,11 +933,15 @@ export class AIGuide {
       audio.onended = () => finish(true)
       audio.onerror = () => finish(false)
 
-      // 主线程繁忙时，浏览器偶发从中途开始播（听感就是"开头被吞"）。
-      // 检测到起播位置异常就拉回开头重播，宁可重复一点也不吞字。
+      // 起播位置检查：只看第一次起播，且阈值放宽。
+      // 注意：playing 事件回调本身可能因主线程繁忙而延迟，阈值太小会把正常起播
+      // 误判成"跳过开头"，然后反复拉回开头（听感就是重复、波动、像两个人在说话）。
+      let startChecked = false
       audio.onplaying = () => {
-        if (audio.currentTime > 0.3) {
-          console.warn('[TTS] 起播位置异常，回到开头:', audio.currentTime.toFixed(2), 's')
+        if (startChecked) return
+        startChecked = true
+        if (audio.currentTime > 1.2) {
+          console.warn('[TTS] 起播位置明显偏后，回到开头:', audio.currentTime.toFixed(2), 's')
           try { audio.currentTime = 0 } catch (e) { /* 忽略 */ }
         }
       }
@@ -1269,9 +1277,13 @@ export class AIGuide {
       if (skipped) console.warn(`[TTS] 本段有 ${skipped} 句没能播放`)
       return played && version === this._queueVersion
     } finally {
-      this._scheduledSources = null
-      this._finishSpeech = null
-      this._sentenceAbortController = null
+      // 只有"当前这一轮"才能清理状态，否则旧的一轮会把新一轮的
+      // 排程列表/中止器清掉，导致新一轮的音频没人能停（叠着播）
+      if (version === this._queueVersion) {
+        this._scheduledSources = null
+        this._finishSpeech = null
+        this._sentenceAbortController = null
+      }
     }
   }
 

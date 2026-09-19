@@ -10,7 +10,7 @@ import { TrainingReplay } from './trainingReplay.js'
 import { physicsKnowledgeBase, getKnowledgeCard, calcPhysicsState } from './physicsKnowledge.js'
 import { initAmap, destroyAmap } from './amap.js'
 import { LocationMarkers } from './locationMarkers.js'
-import { InteractiveLesson } from './interactiveLesson.js'
+import { InteractiveLesson, LESSON_FEEDBACK_SPEECHES } from './interactiveLesson.js'
 
 const state = {
   windSpeed: 0.5,  // 泥石流流动强度
@@ -597,7 +597,7 @@ function buildTacticalNarration() {
  * 初始化时要预合成的语音清单：3D 演示讲词优先，其次是各阶段讲词。
  */
 function buildPreloadSpeechList() {
-  const texts = [buildTacticalNarration()]
+  const texts = [buildTacticalNarration(), ...LESSON_FEEDBACK_SPEECHES]
   for (const episode of [0, 20, 50, 100, 200]) {
     const message = getKnowledgeCard(episode)?.voiceText || STAGE_MESSAGES[episode]
     if (message) texts.push(message)
@@ -1156,6 +1156,9 @@ function setupUI() {
     trainingMode = TRAINING_MODES.STAGE_ALL
     state.isPlaying = true
     playBtn.innerHTML = '⏸️ 停止全部阶段演示'
+    // 先停掉可能还在播的语音：否则第 0 阶段会命中"同文本防抖"而被跳过，
+    // 演示看起来就像直接从第 20 阶段开始
+    aiGuide?.stopSpeech?.()
 
     const voiceReady = prepareVoice().catch(() => {
       console.warn('语音未解锁，仍然启动无声演示')
