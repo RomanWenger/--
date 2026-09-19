@@ -33,6 +33,9 @@ export class AIGuide {
     this._sentenceCache = new Map()
     this._sentenceAbortController = null
     this._currentSource = null
+    this._scheduledSources = null
+    // 语速：1.1 ≈ 快 10%（Web Audio 队列播放会随之略微升高音调，觉得不合适可改回 1.0）
+    this.speechPlaybackRate = 1.1
 
     // 程序化动画状态（playNod / playWave 等动画依赖它，必须初始化）
     this.animState = { current: 'idle', timer: 0, duration: 0, progress: 0 }
@@ -48,8 +51,8 @@ export class AIGuide {
     this.onSpeechPlaying = null
     this._speechPlayingNotified = -1
 
-    // 语速估算：MiMo 冰糖音色实测约 5.6 字/秒，用于给动画配速
-    this.speechCharsPerSecond = 5.6
+    // 语速估算：MiMo 冰糖音色长讲解实测约 5.0 字/秒，用于给动画配速
+    this.speechCharsPerSecond = 5.0
 
     this._build()
   }
@@ -543,6 +546,14 @@ export class AIGuide {
       this._currentSource = null
     }
 
+    if (this._scheduledSources?.length) {
+      for (const source of this._scheduledSources.splice(0)) {
+        try { source.onended = null } catch (e) { /* 忽略 */ }
+        try { source.stop() } catch (e) { /* 忽略 */ }
+      }
+    }
+    this._scheduledSources = null
+
     if (this._streamAudio) {
       try {
         this._streamAudio.pause()
@@ -636,7 +647,9 @@ export class AIGuide {
   estimateSpeechDuration(message) {
     const text = String(message ?? '').replace(/\s+/g, '')
     if (!text) return 0
-    return text.length / this.speechCharsPerSecond
+    const rate = this.speechPlaybackRate || 1
+    // 实测约 5.0 字/秒；裁掉首尾静音约省 6%，再按语速倍率折算
+    return (text.length / this.speechCharsPerSecond) * 0.94 / rate
   }
 
   /**
@@ -792,6 +805,8 @@ export class AIGuide {
       const audio = new Audio(url)
       audio.preload = 'auto'
       audio.volume = 0.85
+      audio.playbackRate = this.speechPlaybackRate || 1
+      audio.preservesPitch = true
       this._streamAudio = audio
 
       const cleanup = () => {
@@ -842,6 +857,8 @@ export class AIGuide {
       const audio = new Audio()
       audio.preload = 'auto'
       audio.volume = 0.85
+      audio.playbackRate = this.speechPlaybackRate || 1
+      audio.preservesPitch = true
 
       const cleanup = () => {
         if (settled) return
@@ -1041,22 +1058,12 @@ export class AIGuide {
   }
 
   /**
-   * 解码单句并播放，等待播放结束才返回。
-   */
-  async _decodeAndPlaySentence(arrayBuffer, version) {
-    if (!this._audioContext) {
-      throw new Error('AudioContext 尚未初始化')
-    }
-    if (version !== this._queueVersion) return false
-
-    const audioBuffer = await this._audioContext.decodeAudioData(arrayBuffer.slice(0))
-    if (version !== this._queueVersion) return false
-
-    return await this._playAudioBuffer(audioBuffer, version)
-  }
-
-  /**
-   * 短句顺序播放队列：逐句「请求 + 解码 + 播放」，播放当前句时预取下句。
+   * 短句顺序播放队列：逐句「请求 + 解码 + 排程」，无缝连播。
+   *
+   * 无缝的三个要点：
+   *  1. 用 Web Audio 时钟排程（source.start(时间点)），句与句之间不留 JS 调度的缝隙；
+   *  2. 每句先裁掉首尾静音，去掉"听完一句干等一下"的空档；
+   *  3. 预取失败不致命：轮到该句时会重试，重试仍失败就跳过，不打断整段讲解。
    */
   async _playSentenceQueue(sentences, version, startedAt = 0) {
     if (this._audioContext?.state === 'suspended') {
@@ -1066,89 +1073,119 @@ export class AIGuide {
       throw new Error(`音频上下文无法运行：${this._audioContext?.state || 'unavailable'}`)
     }
 
+    const ctx = this._audioContext
+    const rate = this.speechPlaybackRate || 1
+    const sources = []
+    let scheduledUntil = 0
+    let skipped = 0
+
+    this._scheduledSources = sources
+
     try {
       for (let index = 0; index < sentences.length; index += 1) {
         if (version !== this._queueVersion) return false
 
-        const currentPromise = this._fetchSentenceAudio(sentences[index], version)
-
-        let nextPromise = null
-        if (index + 1 < sentences.length) {
-          nextPromise = this._fetchSentenceAudio(sentences[index + 1], version)
-          // 预取失败不应该变成 unhandledrejection
-          nextPromise.catch(() => {})
+        // 预取后面两句（失败只记日志，轮到它时会重试）
+        for (let ahead = 1; ahead <= 2; ahead += 1) {
+          if (index + ahead < sentences.length) {
+            this._fetchSentenceAudio(sentences[index + ahead], version).catch(() => null)
+          }
         }
 
-        const currentAudio = await currentPromise
-
-        if (index === 0 && startedAt) {
-          console.log('[TTS] 首句合成完成:', Math.round(performance.now() - startedAt), 'ms')
+        let arrayBuffer = null
+        try {
+          arrayBuffer = await this._fetchSentenceAudio(sentences[index], version)
+        } catch (error) {
+          if (error?.name === 'AbortError') return false
+          skipped += 1
+          console.warn('[TTS] 这一句没能取到音频，跳过继续:', error?.message || error)
+          continue
         }
+        if (version !== this._queueVersion) return false
 
-        const played = await this._decodeAndPlaySentence(currentAudio, version)
+        let buffer = null
+        try {
+          buffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+        } catch (error) {
+          skipped += 1
+          console.warn('[TTS] 这一句解码失败，跳过继续:', error)
+          continue
+        }
+        if (version !== this._queueVersion) return false
+
+        const clip = this._trimSilence(buffer)
+        const source = ctx.createBufferSource()
+        const gain = ctx.createGain()
+        source.buffer = clip
+        source.playbackRate.value = rate
+        gain.gain.value = 0.95
+        source.connect(gain)
+        gain.connect(ctx.destination)
 
         if (index === 0 && startedAt) {
           console.log('[TTS] 首句开始播放:', Math.round(performance.now() - startedAt), 'ms')
         }
 
-        if (!played) return false
-        if (nextPromise) await nextPromise
+        const startAt = Math.max(ctx.currentTime + 0.03, scheduledUntil)
+        source.start(startAt)
+        scheduledUntil = startAt + clip.duration / rate
+        sources.push(source)
+        this._notifySpeechPlaying(version)
       }
-      return true
+
+      if (!sources.length) return false
+
+      // 等最后一句播完；被 stopSpeech 打断时立即收尾
+      const played = await new Promise(resolve => {
+        let done = false
+        const complete = value => {
+          if (done) return
+          done = true
+          resolve(value)
+        }
+        const last = sources[sources.length - 1]
+        last.onended = () => complete(true)
+        this._finishSpeech = () => {
+          for (const item of sources) {
+            try { item.onended = null } catch (e) { /* 忽略 */ }
+            try { item.stop() } catch (e) { /* 忽略 */ }
+          }
+          complete(false)
+        }
+      })
+
+      if (skipped) console.warn(`[TTS] 本段有 ${skipped} 句没能播放`)
+      return played && version === this._queueVersion
     } finally {
+      this._scheduledSources = null
+      this._finishSpeech = null
       this._sentenceAbortController = null
     }
   }
 
   /**
-   * 使用 AudioBufferSourceNode 播放音频，等待 onended 后才 resolve。
+   * 裁掉音频首尾的静音（首尾各留一点余量，避免削掉起音和收尾）。
    */
-  _playAudioBuffer(audioBuffer, version) {
-    return new Promise(resolve => {
-      if (!this._audioContext) {
-        resolve(false)
-        return
-      }
-      if (version !== this._queueVersion) {
-        resolve(false)
-        return
-      }
+  _trimSilence(audioBuffer, threshold = 0.006) {
+    const data = audioBuffer.getChannelData(0)
+    const sampleRate = audioBuffer.sampleRate
+    let start = 0
+    let end = data.length - 1
 
-      const source = this._audioContext.createBufferSource()
-      const gain = this._audioContext.createGain()
+    while (start <= end && Math.abs(data[start]) < threshold) start += 1
+    while (end > start && Math.abs(data[end]) < threshold) end -= 1
+    if (start >= end) return audioBuffer
 
-      source.buffer = audioBuffer
-      gain.gain.value = 0.95
-      source.connect(gain)
-      gain.connect(this._audioContext.destination)
+    start = Math.max(0, start - Math.floor(sampleRate * 0.02))
+    end = Math.min(data.length - 1, end + Math.floor(sampleRate * 0.06))
+    const length = end - start + 1
+    if (length >= data.length || length < sampleRate * 0.05) return audioBuffer
 
-      this._currentSource = source
-
-      let settled = false
-      const finish = (success) => {
-        if (settled) return
-        settled = true
-        source.onended = null
-        try {
-          source.disconnect()
-          gain.disconnect()
-        } catch (e) { /* 忽略 */ }
-        if (this._currentSource === source) this._currentSource = null
-        if (this._finishSpeech === finish) this._finishSpeech = null
-        resolve(success)
-      }
-
-      this._finishSpeech = finish
-      source.onended = () => finish(version === this._queueVersion)
-
-      try {
-        source.start(0)
-        this._notifySpeechPlaying(version)
-      } catch (error) {
-        console.error('AudioBuffer 播放失败:', error)
-        finish(false)
-      }
-    })
+    const out = this._audioContext.createBuffer(audioBuffer.numberOfChannels, length, sampleRate)
+    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
+      out.copyToChannel(audioBuffer.getChannelData(channel).subarray(start, end + 1), channel)
+    }
+    return out
   }
 
   /**
