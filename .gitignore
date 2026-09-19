@@ -32,3 +32,12 @@ archive/
 *.zip
 *.7z
 *.log
+
+# ===== Electron 打包产物（构建生成，不入库） =====
+release-final/
+release/
+win-unpacked/
+*.exe
+
+# 构建缓存
+.cache/
