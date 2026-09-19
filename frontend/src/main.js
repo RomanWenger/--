@@ -430,7 +430,7 @@ const tacticalDemo = {
   token: 0,
   marker: null,
   routeLine: null,
-  stageIndex: 0,
+  startTimer: null,
   cameraSnapshot: null,
   controlsSnapshot: null,
   routeLayerVisibility: null,
@@ -540,9 +540,16 @@ function updateTacticalPlayButton(isPlaying) {
     : '🎬 在 3D 地图上演示全程战术走位'
 }
 
-function announceTacticalStage(stage) {
-  if (!stage) return
-  aiGuide?.say?.(stage.message, 0, true)
+function buildTacticalNarration() {
+  const risk = finiteNumber(state.hazard?.peak_scale, state.windSpeed, 0.5)
+  const riskWord = risk > 0.7 ? '很高' : risk > 0.4 ? '中等' : '较低'
+  return (
+    '接下来演示救援队从吉隆口岸前指出发，前往被困人员所在区域的全过程战术走位。' +
+    '第一阶段，队伍沿山谷东侧平缓的等高线向山麓推进，把爬坡的机械能消耗压到最低。' +
+    `第二阶段，前方泥石流风险${riskWord}，队伍选择沟道收窄、流速较慢的基岩带快速横切，绝不在沟槽里停留。` +
+    '第三阶段，穿过冲沟后切入被困人员所在的安全阶地，建立临时锚点，完成接近与转运。' +
+    '到这里，从口岸前指到受灾核心区的全程走位演示就结束了。'
+  )
 }
 
 function disposeObject(object) {
@@ -613,30 +620,6 @@ function createRescueMarker() {
   return group
 }
 
-function getTacticalStages(points) {
-  const n = points.length
-  return [
-    {
-      name: '第一阶段：口岸前指离场',
-      start: 0,
-      end: Math.max(1, Math.floor(n * 0.36)),
-      message: '救援队从吉隆口岸前指出发，沿相对平缓区域向山麓推进。'
-    },
-    {
-      name: '第二阶段：横切泥石流冲沟',
-      start: Math.max(1, Math.floor(n * 0.36)),
-      end: Math.max(2, Math.floor(n * 0.72)),
-      message: '队伍进入泥石流冲沟影响段，沿风险较低方向快速横切，避免在沟槽内停留。'
-    },
-    {
-      name: '第三阶段：进入受灾核心区',
-      start: Math.max(2, Math.floor(n * 0.72)),
-      end: n - 1,
-      message: '救援队离开冲沟区域，进入被困人员所在安全段，完成接近和撤离。'
-    }
-  ]
-}
-
 function followTacticalMarker(position) {
   const controls = sceneManager?.controls
   const camera = sceneManager?.camera
@@ -660,6 +643,12 @@ function followTacticalMarker(position) {
 function stopTacticalDemo(restore = true) {
   tacticalDemo.playing = false
   tacticalDemo.token += 1
+
+  if (tacticalDemo.startTimer) {
+    clearTimeout(tacticalDemo.startTimer)
+    tacticalDemo.startTimer = null
+  }
+  if (aiGuide) aiGuide.onSpeechPlaying = null
 
   if (tacticalDemo.rafId) {
     cancelAnimationFrame(tacticalDemo.rafId)
@@ -693,12 +682,6 @@ function finishTacticalDemo() {
 
   tacticalDemo.playing = false
 
-  aiGuide?.say?.(
-    '救援队已完成从吉隆口岸前指到受灾核心区的全程战术走位。',
-    0,
-    true
-  )
-
   setTimeout(() => {
     if (!tacticalDemo.playing) {
       stopTacticalDemo(true)
@@ -718,6 +701,10 @@ function playTacticalDemo() {
   saveCameraState()
   pauseUserControls()
 
+  // 一整段连贯讲解（不再按阶段切成一段段），用估算时长给动画配速
+  const narration = buildTacticalNarration()
+  const speechSeconds = aiGuide?.estimateSpeechDuration?.(narration) || 20
+
   tacticalDemo.playing = true
   tacticalDemo.token += 1
 
@@ -730,11 +717,28 @@ function playTacticalDemo() {
   route.add(marker)
   mountRouteLayer('tactical', route)
 
-  const stages = getTacticalStages(points)
-  tacticalDemo.stageIndex = -1
+  const duration = Math.max(6000, (speechSeconds + 0.8) * 1000)
+  let startTime = performance.now()
+  let demoStarted = false
 
-  const startTime = performance.now()
-  const duration = Math.max(9000, Math.min(18000, points.length * 280))
+  const startMoving = () => {
+    if (demoStarted || !tacticalDemo.playing || token !== tacticalDemo.token) return
+    demoStarted = true
+    if (tacticalDemo.startTimer) {
+      clearTimeout(tacticalDemo.startTimer)
+      tacticalDemo.startTimer = null
+    }
+    startTime = performance.now()
+    tacticalDemo.rafId = requestAnimationFrame(animate)
+  }
+
+  // 等语音真正出声那一刻再让救援队员起步，保证"走到终点"和"讲完"对齐；
+  // 语音超过 8 秒还没起来（比如接口不通），就照常开始演示。
+  tacticalDemo.startTimer = setTimeout(startMoving, 8000)
+  aiGuide.onSpeechPlaying = startMoving
+
+  // 长段落走短句队列：逐句合成、边播边取，比整段合成快得多
+  aiGuide?.say?.(narration, 0, true, { preferSentences: true })
 
   function animate(now) {
     if (!tacticalDemo.playing || token !== tacticalDemo.token) {
@@ -749,13 +753,6 @@ function playTacticalDemo() {
 
     marker.position.lerpVectors(points[left], points[right], localT)
 
-    const currentStage = stages.findIndex(stage => left >= stage.start && left <= stage.end)
-
-    if (currentStage !== tacticalDemo.stageIndex) {
-      tacticalDemo.stageIndex = currentStage
-      announceTacticalStage(stages[currentStage])
-    }
-
     followTacticalMarker(marker.position)
 
     if (progress < 1) {
@@ -765,7 +762,6 @@ function playTacticalDemo() {
     }
   }
 
-  tacticalDemo.rafId = requestAnimationFrame(animate)
   updateTacticalPlayButton(true)
 }
 

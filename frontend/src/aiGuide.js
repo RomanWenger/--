@@ -44,6 +44,12 @@ export class AIGuide {
     this.onSpeechStart = null
     this.onSpeechEnd = null
     this.onSpeechError = null
+    // 语音"真正出声"的那一刻回调（比 onSpeechStart 晚），3D 演示用它对齐动画
+    this.onSpeechPlaying = null
+    this._speechPlayingNotified = -1
+
+    // 语速估算：MiMo 冰糖音色实测约 5.6 字/秒，用于给动画配速
+    this.speechCharsPerSecond = 5.6
 
     this._build()
   }
@@ -624,6 +630,25 @@ export class AIGuide {
   }
 
   /**
+   * 按字数估算一段讲解的时长（秒）。
+   * MiMo 冰糖音色实测约 5.6 字/秒（205 字 → 36.4 秒），用于给动画配速。
+   */
+  estimateSpeechDuration(message) {
+    const text = String(message ?? '').replace(/\s+/g, '')
+    if (!text) return 0
+    return text.length / this.speechCharsPerSecond
+  }
+
+  /**
+   * 通知外部"语音真正开始出声了"；同一次播报只通知一次。
+   */
+  _notifySpeechPlaying(version) {
+    if (this._speechPlayingNotified === version) return
+    this._speechPlayingNotified = version
+    this.onSpeechPlaying?.()
+  }
+
+  /**
    * 播报语音：100% 使用高品质云端 AI 音频
    * - 内存已缓存：0 毫秒即刻播放
    * - 内存未缓存：流式边下边播，同时写入缓存备用
@@ -684,6 +709,23 @@ export class AIGuide {
       if (blob && version === this._queueVersion) {
         console.log('[TTS] 缓存命中起播:', Math.round(performance.now() - startedAt), 'ms')
         return speakEnded(await this._playBlobAudio(blob, version))
+      }
+
+      // 长段落（如 3D 演示讲解）直接走短句队列：整段合成要等很久，逐句合成快得多
+      if (options.preferSentences && this._audioContext) {
+        const presetSentences = this._splitSpeechText(text)
+        if (presetSentences.length > 1) {
+          this._sentenceAbortController = new AbortController()
+          try {
+            const ok = await this._playSentenceQueue(presetSentences, version, startedAt)
+            if (version !== this._queueVersion) return false
+            if (ok) return speakEnded(true)
+          } catch (error) {
+            if (error?.name !== 'AbortError') {
+              console.warn('[TTS] 短句队列失败，改用兜底链路:', error)
+            }
+          }
+        }
       }
 
       // 3. 流式端点：首包即播
@@ -772,7 +814,9 @@ export class AIGuide {
       audio.onended = () => finish(true)
       audio.onerror = () => finish(false)
 
-      audio.play().catch(error => {
+      audio.play().then(() => {
+        this._notifySpeechPlaying(version)
+      }).catch(error => {
         if (error?.name !== 'AbortError') console.warn('[TTS] 音频播放受阻:', error)
         finish(false)
       })
@@ -849,6 +893,7 @@ export class AIGuide {
         started = true
         lastProgressAt = Date.now()
         console.log('[TTS] 流式音频首包已起播')
+        this._notifySpeechPlaying(version)
       }
       audio.onended = () => finish(true)
       audio.onerror = () => {
@@ -904,28 +949,50 @@ export class AIGuide {
 
     if (!normalized) return []
 
-    const parts = normalized
+    // 先按句末标点切，再按逗号/顿号细分，最后把过短片段合并到 22 字左右：
+    // 块越短首句合成越快（出声更早），块太长则单句等待久。
+    const sentences = normalized
       .split(/(?<=[。！？!?；;])\s*/)
       .map(item => item.trim())
       .filter(Boolean)
 
     const result = []
-    for (const part of parts) {
-      if (part.length <= 80) {
-        result.push(part)
+    for (const sentence of sentences) {
+      const pieces = sentence
+        .split(/(?<=[，,、])\s*/)
+        .map(item => item.trim())
+        .filter(Boolean)
+
+      let buffer = ''
+      for (const piece of pieces) {
+        if (buffer && buffer.length + piece.length > 22) {
+          result.push(buffer)
+          buffer = piece
+        } else {
+          buffer += piece
+        }
+      }
+      if (buffer) result.push(buffer)
+    }
+
+    const chunks = []
+    for (const part of result) {
+      if (part.length <= 60) {
+        chunks.push(part)
         continue
       }
-      for (let i = 0; i < part.length; i += 80) {
-        result.push(part.slice(i, i + 80))
+      for (let i = 0; i < part.length; i += 60) {
+        chunks.push(part.slice(i, i + 60))
       }
     }
-    return result
+    return chunks
   }
 
   /**
    * 请求单句音频（带缓存 + 版本校验 + 取消）。
+   * 偶发的连接卡顿/超时会自动重试一次，避免整段讲解因为一句失败而中断。
    */
-  async _fetchSentenceAudio(text, version) {
+  async _fetchSentenceAudio(text, version, attempt = 0) {
     if (version !== this._queueVersion) {
       throw new DOMException('speech cancelled', 'AbortError')
     }
@@ -938,27 +1005,39 @@ export class AIGuide {
       ? this._sentenceAbortController.signal
       : undefined
 
-    const response = await fetch(this.ttsUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-      signal
-    })
+    try {
+      const response = await fetch(this.ttsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal
+      })
 
-    if (!response.ok) {
-      throw new Error(`TTS 请求失败 ${response.status}`)
-    }
+      if (!response.ok) {
+        throw new Error(`TTS 请求失败 ${response.status}`)
+      }
 
-    const arrayBuffer = await response.arrayBuffer()
-    if (!arrayBuffer.byteLength) {
-      throw new Error('TTS 返回空音频')
-    }
+      const arrayBuffer = await response.arrayBuffer()
+      if (!arrayBuffer.byteLength) {
+        throw new Error('TTS 返回空音频')
+      }
 
-    this._sentenceCache.set(text, arrayBuffer.slice(0))
-    while (this._sentenceCache.size > 120) {
-      this._sentenceCache.delete(this._sentenceCache.keys().next().value)
+      this._sentenceCache.set(text, arrayBuffer.slice(0))
+      while (this._sentenceCache.size > 120) {
+        this._sentenceCache.delete(this._sentenceCache.keys().next().value)
+      }
+      return arrayBuffer
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error
+      if (attempt >= 1) throw error
+
+      console.warn('[TTS] 短句请求失败，300ms 后重试一次:', error?.message || error)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      if (version !== this._queueVersion) {
+        throw new DOMException('speech cancelled', 'AbortError')
+      }
+      return await this._fetchSentenceAudio(text, version, attempt + 1)
     }
-    return arrayBuffer
   }
 
   /**
@@ -1064,6 +1143,7 @@ export class AIGuide {
 
       try {
         source.start(0)
+        this._notifySpeechPlaying(version)
       } catch (error) {
         console.error('AudioBuffer 播放失败:', error)
         finish(false)
