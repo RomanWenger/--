@@ -112,7 +112,13 @@ export class SceneManager {
     const delta = this.clock.getDelta()
     this.controls.update()
     for (const fn of this.animatables) {
-      fn(delta)
+      // 单项出错只跳过这一项：否则后面的更新和 render 都不会执行，
+      // 画面会卡住、语音时序也会跟着乱
+      try {
+        fn(delta)
+      } catch (error) {
+        console.error('场景动画项出错（已跳过，不影响本帧渲染）:', error)
+      }
     }
     this.renderer.render(this.scene, this.camera)
   }

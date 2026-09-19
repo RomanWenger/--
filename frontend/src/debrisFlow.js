@@ -168,11 +168,26 @@ export class DebrisFlow {
   }
 
   _buildChannelCurve() {
-    this._channelPts = this.hazard.channel.map(([i, j]) => {
-      const p = this._gridToWorld(i, j)
-      const y = this._sampleHeight(p.x, p.z, p.y) + 0.08
-      return new THREE.Vector3(p.x, y, p.z)
-    })
+    // 后端 channel 数据偶尔会有空项/越界点：直接塞进曲线会让 getPointAt 抛
+    // "Cannot read properties of undefined"，而它发生在每帧动画里，会中断整帧渲染
+    const raw = Array.isArray(this.hazard?.channel) ? this.hazard.channel : []
+
+    this._channelPts = raw
+      .map((entry) => {
+        if (!Array.isArray(entry) || entry.length < 2) return null
+        const p = this._gridToWorld(Number(entry[0]), Number(entry[1]))
+        if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return null
+        const y = this._sampleHeight(p.x, p.z, p.y) + 0.08
+        if (!Number.isFinite(y)) return null
+        return new THREE.Vector3(p.x, y, p.z)
+      })
+      .filter(Boolean)
+
+    if (this._channelPts.length < 2) {
+      this._channelCurve = null
+      return
+    }
+
     this._channelCurve = new THREE.CatmullRomCurve3(
       this._channelPts, false, 'centripetal'
     )
@@ -181,6 +196,8 @@ export class DebrisFlow {
   // 2. 堆积扇：从冲沟末端向河谷/吉隆口岸扇形铺开的泥浆堆积体
   //    视觉上明确展示"泥石流冲下河谷、把口岸地段淤埋"，且随强度增大范围/厚度越明显
   _buildDepositFan() {
+    if (!this._channelPts || this._channelPts.length < 3) return
+
     const intensity = this._getIntensity()
 
     // 扇顶 = 主流带末端地面点

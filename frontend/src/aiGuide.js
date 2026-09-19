@@ -820,7 +820,7 @@ export class AIGuide {
       }
 
       if (blob && version === this._queueVersion) {
-        console.log('[TTS] 缓存命中起播:', Math.round(performance.now() - startedAt), 'ms')
+        console.log('[TTS] 缓存命中起播:', Math.round(performance.now() - startedAt), 'ms', '「' + text.slice(0, 12) + '」')
         return speakEnded(await this._playBlobAudio(blob, version))
       }
 
@@ -946,12 +946,30 @@ export class AIGuide {
         }
       }
 
-      audio.play().then(() => {
-        this._notifySpeechPlaying(version)
-      }).catch(error => {
-        if (error?.name !== 'AbortError') console.warn('[TTS] 音频播放受阻:', error)
-        finish(false)
-      })
+      // 等浏览器把这段音频准备好再起播：主线程繁忙时"边解码边播"可能从中途开始，
+      // 听感就是开头被吞（本地 blob 通常几十毫秒就绪，几乎无感）
+      const startPlayback = () => {
+        audio.play().then(() => {
+          this._notifySpeechPlaying(version)
+        }).catch(error => {
+          if (error?.name !== 'AbortError') console.warn('[TTS] 音频播放受阻:', error)
+          finish(false)
+        })
+      }
+
+      if (audio.readyState >= 3) {
+        startPlayback()
+      } else {
+        let startTriggered = false
+        const readyToStart = () => {
+          if (startTriggered || settled) return
+          startTriggered = true
+          startPlayback()
+        }
+        audio.oncanplay = readyToStart
+        audio.oncanplaythrough = readyToStart
+        setTimeout(readyToStart, 1200)
+      }
     })
   }
 

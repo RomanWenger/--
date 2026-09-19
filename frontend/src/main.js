@@ -10,7 +10,7 @@ import { TrainingReplay } from './trainingReplay.js'
 import { physicsKnowledgeBase, getKnowledgeCard, calcPhysicsState } from './physicsKnowledge.js'
 import { initAmap, destroyAmap } from './amap.js'
 import { LocationMarkers } from './locationMarkers.js'
-import { InteractiveLesson, LESSON_FEEDBACK_SPEECHES } from './interactiveLesson.js'
+import { InteractiveLesson, LESSON_FEEDBACK_SPEECHES, LESSON_INTRO_SPEECH } from './interactiveLesson.js'
 
 const state = {
   windSpeed: 0.5,  // 泥石流流动强度
@@ -597,7 +597,7 @@ function buildTacticalNarration() {
  * 初始化时要预合成的语音清单：3D 演示讲词优先，其次是各阶段讲词。
  */
 function buildPreloadSpeechList() {
-  const texts = [buildTacticalNarration(), ...LESSON_FEEDBACK_SPEECHES]
+  const texts = [buildTacticalNarration(), LESSON_INTRO_SPEECH, ...LESSON_FEEDBACK_SPEECHES]
   for (const episode of [0, 20, 50, 100, 200]) {
     const message = getKnowledgeCard(episode)?.voiceText || STAGE_MESSAGES[episode]
     if (message) texts.push(message)
@@ -1798,10 +1798,12 @@ function setupUI() {
       lessonSection?.classList.remove('is-closed')
       updateCardReopenButtons?.()
       syncLessonContext?.()
+      // 预取答题反馈语音：答题时直接命中缓存，不再现场合成
+      LESSON_FEEDBACK_SPEECHES.forEach(speech => aiGuide.prefetchSpeech?.(speech))
       interactiveLesson.start()
 
       // 4. 立即播报开场白（打断任何历史残留音频）
-      await aiGuide.say('科普任务开始。请先观察地形，再根据物理规律做出判断。', 0, true, true)
+      await aiGuide.say(LESSON_INTRO_SPEECH, 0, true, true)
     })
   }
 
