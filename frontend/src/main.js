@@ -424,6 +424,9 @@ function scheduleTerrainUpdate(delay = 200) {
 }
 
 let cameraAnimationToken = 0
+// 单阶段"3D聚焦"的返回视角：聚焦前记住原视角，讲完自动平滑恢复
+let focusReturnToken = 0
+let focusReturnView = null
 const tacticalDemo = {
   playing: false,
   rafId: 0,
@@ -691,6 +694,10 @@ function finishTacticalDemo() {
 
 function playTacticalDemo() {
   stopTacticalDemo(false)
+
+  // 若有"3D聚焦"的待恢复视角，先取消，避免和演示抢镜头
+  focusReturnToken += 1
+  focusReturnView = null
 
   const points = getTacticalRoute()
   if (points.length < 2) {
@@ -1848,12 +1855,76 @@ function generateTacticalPlan() {
     stepsEl.querySelectorAll('.focus-stage-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.stage)
-        const target = stages[idx].target
-        smoothFocusCamera(target, { x: 7, y: 6, z: 9 })
-        if (aiGuide) aiGuide.say(stages[idx].desc, 0, true)
+        focusStageAndReturn(stages[idx].target, stages[idx].desc)
       })
     })
   }
+}
+
+/**
+ * 记住"3D聚焦"之前的视角（已有记录时不覆盖，避免连点丢失最初视角）。
+ */
+function rememberViewBeforeFocus() {
+  if (focusReturnView) return
+  const camera = sceneManager?.camera
+  const controls = sceneManager?.controls
+  if (!camera || !controls) return
+  focusReturnView = {
+    position: camera.position.clone(),
+    target: controls.target.clone()
+  }
+}
+
+/**
+ * 平滑回到"3D聚焦"之前的视角。
+ */
+function restoreViewAfterFocus(duration = 900) {
+  const saved = focusReturnView
+  focusReturnView = null
+  if (!saved) return
+
+  const controls = sceneManager?.controls
+  const camera = sceneManager?.camera
+  if (!controls || !camera) return
+
+  cancelCameraAnimation()
+  const token = cameraAnimationToken
+  const startTarget = controls.target.clone()
+  const startCam = camera.position.clone()
+  const startTime = performance.now()
+
+  function animateBack(now) {
+    if (token !== cameraAnimationToken) return
+    const p = Math.min(1, (now - startTime) / duration)
+    const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    controls.target.lerpVectors(startTarget, saved.target, ease)
+    camera.position.lerpVectors(startCam, saved.position, ease)
+    controls.update()
+    if (p < 1) requestAnimationFrame(animateBack)
+  }
+
+  requestAnimationFrame(animateBack)
+}
+
+/**
+ * 点击"3D聚焦"：记住原视角 → 聚焦到该阶段并讲解 → 讲完自动回到原视角。
+ * 连点其它阶段时，只有最后一次生效，不会互相打断。
+ */
+async function focusStageAndReturn(target, speech) {
+  const token = ++focusReturnToken
+  rememberViewBeforeFocus()
+  smoothFocusCamera(target, { x: 7, y: 6, z: 9 })
+
+  const spoken = aiGuide?.say?.(speech, 0, true)
+  if (spoken && typeof spoken.then === 'function') {
+    await spoken.catch(() => {})
+  } else {
+    // 语音不可用时也要能回到原视角，最多停留 6 秒
+    await new Promise(resolve => setTimeout(resolve, 6000))
+  }
+
+  if (token !== focusReturnToken) return
+  restoreViewAfterFocus()
 }
 
 function smoothFocusCamera(targetPos, cameraOffset = { x: 8, y: 7, z: 10 }, duration = 1200) {

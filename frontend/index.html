@@ -692,6 +692,8 @@
     #knowledge-card.visible {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
+      /* 显示时必须恢复鼠标事件，否则右上角的 × 收不到点击 */
+      pointer-events: auto;
     }
     .kc-tags {
       display: flex;
