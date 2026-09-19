@@ -1109,11 +1109,22 @@ function setupUI() {
         windParticles.updateRibbonHeight()
       }
     }
+    // 地形高度变了，标注、旗标、路径选点都要跟着重新贴地（否则会悬空/埋进山里）
+    locationMarkers?.refreshSurfacePositions?.()
+    terrain?.refreshMarkerHeights?.(state.terrainData)
+    if (state.currentPath?.length) {
+      terrain?.highlightPath?.(state.currentPath, state.terrainData)
+    }
   })
 
   // 松开滑块后只重新规划一次路径（不重建地形）
   ampSlider.addEventListener('change', () => {
     schedulePathUpdate()
+    locationMarkers?.refreshSurfacePositions?.()
+    terrain?.refreshMarkerHeights?.(state.terrainData)
+    if (state.currentPath?.length) {
+      terrain?.highlightPath?.(state.currentPath, state.terrainData)
+    }
   })
 
   playBtn.addEventListener('click', async () => {

@@ -1063,6 +1063,25 @@ export class Terrain {
     if (this.goalMarker) this.goalMarker.visible = visible
   }
 
+  /**
+   * 按当前地形高度重新摆放起点/终点旗标（地形起伏变化后调用）。
+   */
+  refreshMarkerHeights(terrainData) {
+    if (!this.glbTerrain || !terrainData) return
+
+    if (this.startMarker && Array.isArray(this._start)) {
+      const [si, sj] = this._start
+      const p = this.glbTerrain.gridToWorld(si, sj)
+      this.startMarker.position.set(p.x, this._getSurfaceY(si, sj, terrainData), p.z)
+    }
+
+    if (this.goalMarker && Array.isArray(this._goal)) {
+      const [gi, gj] = this._goal
+      const p = this.glbTerrain.gridToWorld(gi, gj)
+      this.goalMarker.position.set(p.x, this._getSurfaceY(gi, gj, terrainData), p.z)
+    }
+  }
+
   highlightPath(path, terrainData) {
     const targetPositions = []
 

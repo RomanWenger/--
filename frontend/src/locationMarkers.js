@@ -45,30 +45,30 @@ export class LocationMarkers {
     // 1. 救援指挥所（安全高地，未受灾后方基地）
     const startGrid = lm.staging?.grid || [2, 4]
     const startPos = this._getSurfacePosition(startGrid[0], startGrid[1])
-    this._createMarker('吉隆救援指挥所（前指安全高地）', startPos, 0x38bdf8, '#7dd3fc')
+    this._createMarker('吉隆救援指挥所（前指安全高地）', startPos, 0x38bdf8, '#7dd3fc', startGrid)
 
     // 2. 泥石流物源区 · 主冲沟源头（高山冰川/崩滑堆积）
     if (channel.length > 0) {
       const head = channel[0]   // 源头：高处冰川融水/崩滑物源区
       const headPos = this._getSurfacePosition(head[0], head[1])
-      this._createMarker('东林藏布·泥石流主冲沟（高山物源区）', headPos, 0xfb923c, '#fdba74')
+      this._createMarker('东林藏布·泥石流主冲沟（高山物源区）', headPos, 0xfb923c, '#fdba74', head)
     }
 
     // 3. 热索桥断桥位（主冲沟中部横切点）
     const bGrid = lm.bridge?.grid || [15, 13]
     const bPos = this._getSurfacePosition(bGrid[0], bGrid[1])
-    this._createMarker('热索桥断桥（横切风险点）', bPos, 0xfacc15, '#fde047')
+    this._createMarker('热索桥断桥（横切风险点）', bPos, 0xfacc15, '#fde047', bGrid)
 
     // 4. 受灾核心：吉隆口岸 · 热索桥（东南谷底堆积扇缘受灾点/失联被困点）
     const goalGrid = lm.trapped?.grid || [18, 15]
     const goalPos = this._getSurfacePosition(goalGrid[0], goalGrid[1])
-    this._createMarker('吉隆口岸·热索桥（受灾核心区）', goalPos, 0xef4444, '#f87171')
+    this._createMarker('吉隆口岸·热索桥（受灾核心区）', goalPos, 0xef4444, '#f87171', goalGrid)
 
     // 5. 后方应急避难点（安全）
     if (lm.shelter?.grid) {
       const shGrid = lm.shelter.grid
       const shPos = this._getSurfacePosition(shGrid[0], shGrid[1])
-      this._createMarker('后方避难安置点', shPos, 0x34d399, '#6ee7b7')
+      this._createMarker('后方避难安置点', shPos, 0x34d399, '#6ee7b7', shGrid)
     }
   }
 
@@ -89,7 +89,7 @@ export class LocationMarkers {
     return new THREE.Vector3(world.x, y, world.z)
   }
 
-  _createMarker(name, pos, colorHex, cssColor) {
+  _createMarker(name, pos, colorHex, cssColor, grid = null) {
     const group = new THREE.Group()
     group.position.copy(pos)
 
@@ -190,7 +190,19 @@ export class LocationMarkers {
     group.add(sprite)
 
     this.group.add(group)
-    this.markers.push({ group, ring })
+    this.markers.push({ group, ring, grid })
+  }
+
+  /**
+   * 按当前地形高度重新贴地。
+   * 地形起伏（setTerrainFactor）只缩放模型、不重建标注，所以变化后必须调用一次，
+   * 否则标注会停在旧高度上（看起来悬在半空或埋进山里）。
+   */
+  refreshSurfacePositions() {
+    for (const marker of this.markers) {
+      if (!marker.grid) continue
+      marker.group.position.copy(this._getSurfacePosition(marker.grid[0], marker.grid[1]))
+    }
   }
 
   update(delta, time) {
