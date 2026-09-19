@@ -40,6 +40,10 @@ export class AIGuide {
     // 若改成非 1.0，blob/流式路径会保持音调不变（preservesPitch）。
     this.speechPlaybackRate = 1.0
 
+    // 每段语音开头补的静音时长：起播瞬间可能被浏览器"跳过"一点点，
+    // 补 0.2 秒静音后，被吃掉的只会是静音而不是第一个字
+    this.speechLeadInSeconds = 0.2
+
     // 程序化动画状态（playNod / playWave 等动画依赖它，必须初始化）
     this.animState = { current: 'idle', timer: 0, duration: 0, progress: 0 }
 
@@ -843,8 +847,8 @@ export class AIGuide {
         }
       }
 
-      // 3. 流式端点：整段合成，只有短文本才划算（长文本整段要等好几秒）
-      if (text.length <= 18) {
+      // 3. 流式端点：仅在 Web Audio 不可用时兜底（有 Web Audio 时统一走带留白的播放链路）
+      if (!this._audioContext) {
         const streamResult = await this._playStreamedAudio(text, version)
         if (version !== this._queueVersion) return false
         if (streamResult.ok) return speakEnded(true)
@@ -897,7 +901,91 @@ export class AIGuide {
   /**
    * 播放 Blob 音频（从内存直接播放，无网络等待）
    */
-  _playBlobAudio(blob, version) {
+  /**
+   * 在音频开头补一段静音（返回新的 AudioBuffer，不改原对象）。
+   */
+  _padBuffer(audioBuffer, leadSeconds) {
+    const lead = Math.max(0, Math.round((leadSeconds || 0) * audioBuffer.sampleRate))
+    if (!lead || !this._audioContext) return audioBuffer
+
+    const ctx = this._audioContext
+    const padded = ctx.createBuffer(
+      audioBuffer.numberOfChannels,
+      audioBuffer.length + lead,
+      audioBuffer.sampleRate
+    )
+    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
+      padded.copyToChannel(audioBuffer.getChannelData(channel), channel, lead)
+    }
+    return padded
+  }
+
+  /**
+   * 用 Web Audio 播放一段已解码的音频（开头带留白），播完才 resolve。
+   */
+  _playBufferWithLeadIn(audioBuffer, version, leadSeconds = 0) {
+    return new Promise(resolve => {
+      if (!this._audioContext || version !== this._queueVersion) {
+        resolve(false)
+        return
+      }
+
+      const ctx = this._audioContext
+      const padded = this._padBuffer(audioBuffer, leadSeconds)
+
+      const source = ctx.createBufferSource()
+      const gain = ctx.createGain()
+      source.buffer = padded
+      source.playbackRate.value = this.speechPlaybackRate || 1
+      gain.gain.value = 0.95
+      source.connect(gain)
+      gain.connect(ctx.destination)
+
+      let settled = false
+      const finish = (success) => {
+        if (settled) return
+        settled = true
+        source.onended = null
+        try {
+          source.disconnect()
+          gain.disconnect()
+        } catch (e) { /* 忽略 */ }
+        if (this._currentSource === source) this._currentSource = null
+        if (this._finishSpeech === finish) this._finishSpeech = null
+        resolve(success && version === this._queueVersion)
+      }
+
+      this._currentSource = source
+      this._finishSpeech = finish
+      source.onended = () => finish(true)
+
+      try {
+        source.start(ctx.currentTime + 0.05)
+        this._notifySpeechPlaying(version)
+      } catch (error) {
+        console.error('AudioBuffer 播放失败:', error)
+        finish(false)
+      }
+    })
+  }
+
+  async _playBlobAudio(blob, version) {
+    if (version !== this._queueVersion) return false
+
+    // 优先走 Web Audio：可以在开头补一小段静音（见 speechLeadInSeconds），
+    // 这样起播瞬间即使被跳过一点点，吃掉的也只是静音
+    if (this._audioContext?.state === 'running') {
+      try {
+        const arrayBuffer = await blob.arrayBuffer()
+        if (version !== this._queueVersion) return false
+        const decoded = await this._audioContext.decodeAudioData(arrayBuffer.slice(0))
+        if (version !== this._queueVersion) return false
+        return await this._playBufferWithLeadIn(decoded, version, this.speechLeadInSeconds)
+      } catch (error) {
+        console.warn('[TTS] Web Audio 播放失败，回退到 audio 元素:', error)
+      }
+    }
+
     return new Promise(resolve => {
       if (version !== this._queueVersion) {
         resolve(false)
@@ -1250,9 +1338,13 @@ export class AIGuide {
         }
         if (version !== this._queueVersion) return false
 
+        // 每段讲解的第一句补一段静音：起播瞬间可能被跳过一小截，补上之后
+        // 被吃掉的只会是静音而不是第一个字（句与句之间不加，保持连贯）
+        const clip = index === 0 ? this._padBuffer(buffer, this.speechLeadInSeconds) : buffer
+
         const source = ctx.createBufferSource()
         const gain = ctx.createGain()
-        source.buffer = buffer
+        source.buffer = clip
         source.playbackRate.value = rate
         gain.gain.value = 0.95
         source.connect(gain)
@@ -1266,7 +1358,7 @@ export class AIGuide {
         const leadIn = index === 0 ? 0.12 : 0.03
         const startAt = Math.max(ctx.currentTime + leadIn, scheduledUntil)
         source.start(startAt)
-        scheduledUntil = startAt + buffer.duration / rate
+        scheduledUntil = startAt + clip.duration / rate
         sources.push(source)
         this._notifySpeechPlaying(version)
       }
