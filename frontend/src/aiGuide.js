@@ -34,8 +34,9 @@ export class AIGuide {
     this._sentenceAbortController = null
     this._currentSource = null
     this._scheduledSources = null
-    // 语速：1.1 ≈ 快 10%（Web Audio 队列播放会随之略微升高音调，觉得不合适可改回 1.0）
-    this.speechPlaybackRate = 1.1
+    // 语速倍率：1.0 = MiMo 自然语速。调大更快，但逐句队列走 Web Audio，音调会略高；
+    // 若改成非 1.0，blob/流式路径会保持音调不变（preservesPitch）。
+    this.speechPlaybackRate = 1.0
 
     // 程序化动画状态（playNod / playWave 等动画依赖它，必须初始化）
     this.animState = { current: 'idle', timer: 0, duration: 0, progress: 0 }
@@ -648,8 +649,8 @@ export class AIGuide {
     const text = String(message ?? '').replace(/\s+/g, '')
     if (!text) return 0
     const rate = this.speechPlaybackRate || 1
-    // 实测约 5.0 字/秒；裁掉首尾静音约省 6%，再按语速倍率折算
-    return (text.length / this.speechCharsPerSecond) * 0.94 / rate
+    // 实测约 5.0 字/秒（187 字 → 约 37 秒），再按语速倍率折算
+    return (text.length / this.speechCharsPerSecond) / rate
   }
 
   /**
@@ -1062,7 +1063,8 @@ export class AIGuide {
    *
    * 无缝的三个要点：
    *  1. 用 Web Audio 时钟排程（source.start(时间点)），句与句之间不留 JS 调度的缝隙；
-   *  2. 每句先裁掉首尾静音，去掉"听完一句干等一下"的空档；
+   *  2. 保留 MiMo 自己合成的自然停顿，不做裁剪（早先按阈值裁首尾静音，
+   *     实测会把某些句子缓慢上升的起音削掉约 50ms，听起来像"吞字"，已去掉）；
    *  3. 预取失败不致命：轮到该句时会重试，重试仍失败就跳过，不打断整段讲解。
    */
   async _playSentenceQueue(sentences, version, startedAt = 0) {
@@ -1113,10 +1115,9 @@ export class AIGuide {
         }
         if (version !== this._queueVersion) return false
 
-        const clip = this._trimSilence(buffer)
         const source = ctx.createBufferSource()
         const gain = ctx.createGain()
-        source.buffer = clip
+        source.buffer = buffer
         source.playbackRate.value = rate
         gain.gain.value = 0.95
         source.connect(gain)
@@ -1128,7 +1129,7 @@ export class AIGuide {
 
         const startAt = Math.max(ctx.currentTime + 0.03, scheduledUntil)
         source.start(startAt)
-        scheduledUntil = startAt + clip.duration / rate
+        scheduledUntil = startAt + buffer.duration / rate
         sources.push(source)
         this._notifySpeechPlaying(version)
       }
@@ -1161,31 +1162,6 @@ export class AIGuide {
       this._finishSpeech = null
       this._sentenceAbortController = null
     }
-  }
-
-  /**
-   * 裁掉音频首尾的静音（首尾各留一点余量，避免削掉起音和收尾）。
-   */
-  _trimSilence(audioBuffer, threshold = 0.006) {
-    const data = audioBuffer.getChannelData(0)
-    const sampleRate = audioBuffer.sampleRate
-    let start = 0
-    let end = data.length - 1
-
-    while (start <= end && Math.abs(data[start]) < threshold) start += 1
-    while (end > start && Math.abs(data[end]) < threshold) end -= 1
-    if (start >= end) return audioBuffer
-
-    start = Math.max(0, start - Math.floor(sampleRate * 0.02))
-    end = Math.min(data.length - 1, end + Math.floor(sampleRate * 0.06))
-    const length = end - start + 1
-    if (length >= data.length || length < sampleRate * 0.05) return audioBuffer
-
-    const out = this._audioContext.createBuffer(audioBuffer.numberOfChannels, length, sampleRate)
-    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
-      out.copyToChannel(audioBuffer.getChannelData(channel).subarray(start, end + 1), channel)
-    }
-    return out
   }
 
   /**
