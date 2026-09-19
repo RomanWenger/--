@@ -399,7 +399,15 @@ function showOnlyRouteLayer(name) {
  * 统一控制"救援路径"相关元素的显隐：路径线、路径上的选点圆环、起终点旗标。
  * 重新训练回放时隐藏它们，画面上只留 AI 从 0 开始学习的轨迹。
  */
+let lastRescuePathLayer = 'plan'
+
 function setRescuePathVisible(visible) {
+  if (!visible) {
+    // 记住隐藏前显示的是哪个图层（训练图层除外，它会被清空）
+    const active = Object.entries(routeLayers).find(([key, layer]) => layer.visible && key !== 'training')
+    if (active) lastRescuePathLayer = active[0]
+  }
+
   if (sceneManager?.scene?.traverse) {
     sceneManager.scene.traverse(object => {
       if (object.userData?.isRescuePath) object.visible = visible
@@ -407,7 +415,14 @@ function setRescuePathVisible(visible) {
   }
 
   if (visible) {
-    showOnlyRouteLayer('plan')
+    // 优先恢复原来那个图层；它若为空（例如还没生成过该阶段路径），再退回有内容的图层
+    const preferred = routeLayers[lastRescuePathLayer]
+    if (preferred?.children?.length) {
+      showOnlyRouteLayer(lastRescuePathLayer)
+    } else {
+      const fallback = ['plan', 'stage', 'tactical'].find(key => routeLayers[key]?.children?.length) || 'plan'
+      showOnlyRouteLayer(fallback)
+    }
   } else {
     for (const layer of Object.values(routeLayers)) layer.visible = false
   }
@@ -1701,6 +1716,8 @@ function setupUI() {
       rescuePlanModal?.classList.remove('hidden')
       await ensureCurrentPhysics()
       generateTacticalPlan()
+      // 若之前被"重新训练回放"隐藏过，这里把救援路径恢复出来
+      setRescuePathVisible(true)
     })
   }
   if (closeRescuePlanModal) {
@@ -1925,6 +1942,8 @@ function generateTacticalPlan() {
     stepsEl.querySelectorAll('.focus-stage-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.stage)
+        // 聚焦前确保路径可见（避免"只有选点没有路径线"）
+        setRescuePathVisible(true)
         focusStageAndReturn(stages[idx].target, stages[idx].desc)
       })
     })
