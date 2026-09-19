@@ -555,6 +555,18 @@ function buildTacticalNarration() {
   )
 }
 
+/**
+ * 初始化时要预合成的语音清单：3D 演示讲词优先，其次是各阶段讲词。
+ */
+function buildPreloadSpeechList() {
+  const texts = [buildTacticalNarration()]
+  for (const episode of [0, 20, 50, 100, 200]) {
+    const message = getKnowledgeCard(episode)?.voiceText || STAGE_MESSAGES[episode]
+    if (message) texts.push(message)
+  }
+  return texts
+}
+
 function disposeObject(object) {
   if (!object) return
 
@@ -984,9 +996,9 @@ async function init() {
     }
   }, 1500)
 
-  // 页面就绪后立即开始串行预加载阶段 0/20，搞定后再预热 50/100/200
+  // 页面就绪后立即开始预加载：3D 演示讲词优先，随后是阶段 0/20/50/100/200
   if (typeof aiGuide?.preloadCommonSpeeches === 'function') {
-    const keys = [0, 20, 50, 100, 200].map(ep => getKnowledgeCard(ep)?.voiceText || STAGE_MESSAGES[ep]).filter(Boolean)
+    const keys = buildPreloadSpeechList()
     aiGuide.preloadCommonSpeeches(keys.slice(0, 2)).then(() => {
       aiGuide.preloadCommonSpeeches(keys.slice(2))
     }).catch(() => {})

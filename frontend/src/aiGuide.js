@@ -596,7 +596,7 @@ export class AIGuide {
   _cacheAudioBlob(text, blob) {
     if (!text || !blob) return
     this._audioBlobCache.set(text, blob)
-    while (this._audioBlobCache.size > 24) {
+    while (this._audioBlobCache.size > 12) {
       const oldest = this._audioBlobCache.keys().next().value
       if (oldest === text) break
       this._audioBlobCache.delete(oldest)
@@ -607,19 +607,37 @@ export class AIGuide {
    * 静默预加载常用固定语音到内存（0 延迟的核心）
    */
   async preloadCommonSpeeches(textList = []) {
-    console.log(`[TTS] 开始在后台静默预加载 ${textList.length} 条常用 AI 语音...`)
-    const tasks = textList.map(async (text) => {
-      const clean = String(text ?? '').trim()
-      if (!clean || this._audioBlobCache.has(clean)) return
-      try {
-        const blob = await this._requestSpeechBlob(clean)
-        this._cacheAudioBlob(clean, blob)
-      } catch (e) {
-        console.warn(`[TTS] 预加载语音失败: "${clean.slice(0, 10)}..."`, e)
+    const pending = textList
+      .map(item => String(item ?? '').trim())
+      .filter(text => text && !this._audioBlobCache.has(text))
+
+    if (!pending.length) return
+
+    // 并发 2：既不把接口压垮，也让第一条（演示讲词）尽快就绪
+    console.log(`[TTS] 后台预加载 ${pending.length} 条常用语音（并发 2）...`)
+
+    let cursor = 0
+    let done = 0
+
+    const worker = async () => {
+      while (cursor < pending.length) {
+        const text = pending[cursor]
+        cursor += 1
+        try {
+          const blob = await this._requestSpeechBlob(text)
+          this._cacheAudioBlob(text, blob)
+          if (blob) {
+            done += 1
+            console.log(`[TTS] 预加载就绪 ${done}/${pending.length}：「${text.slice(0, 12)}…」`)
+          }
+        } catch (error) {
+          console.warn(`[TTS] 预加载失败：「${text.slice(0, 12)}…」`, error)
+        }
       }
-    })
-    await Promise.allSettled(tasks)
-    console.log('[TTS] 常用 AI 语音预加载就绪，后续点击将 0 延迟即时播放！')
+    }
+
+    await Promise.all([worker(), worker()])
+    console.log(`[TTS] 预加载结束：${done}/${pending.length} 条已进内存缓存`)
   }
 
   /**
@@ -931,10 +949,11 @@ export class AIGuide {
    * 请求整段语音（POST /api/tts），返回 Blob 或 null。
    * track=true 时挂到 this._ttsController，stopSpeech() 可以中止它。
    */
-  async _requestSpeechBlob(text, { track = false } = {}) {
+  async _requestSpeechBlob(text, { track = false, timeoutMs = 60000 } = {}) {
     const controller = new AbortController()
     if (track) this._ttsController = controller
-    const timeoutId = setTimeout(() => controller.abort(), 15000)
+    // 长讲解整段合成需要 20~30 秒，超时时间放宽；短句走的是另一条链路（无此超时）
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetch(this.ttsUrl, {
         method: 'POST',

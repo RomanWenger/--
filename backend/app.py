@@ -144,12 +144,21 @@ _MIMO_SESSION.mount(
 )
 
 
-def mimo_tts_bytes(text, audio_format='mp3'):
+# 音频格式：默认用 wav。
+# 原因：mp3 编码器有前导样本（encoder delay），浏览器解码时会丢掉开头约 20~30ms，
+# 逐句播放时每一句的开头都会被削一下（听感"吞字"）。wav 是逐样本精确的，
+# 代价是体积大约 6 倍（24kHz 单声道约 48KB/s），本项目走本机/局域网，可以接受。
+MIMO_TTS_FORMAT = os.environ.get('MIMO_TTS_FORMAT', 'wav')
+
+
+def mimo_tts_bytes(text, audio_format=None):
     """
     调用小米 MiMo 语音合成，成功返回音频字节，失败返回 None（由调用方回退豆包）。
     MiMo 是整段返回、没有逐字流式；文本必须放在 assistant 角色，
     user 角色只放风格指令（不会被朗读）。
     """
+    audio_format = audio_format or MIMO_TTS_FORMAT
+
     if not MIMO_TTS_API_KEY or not text:
         return None
 
@@ -220,7 +229,8 @@ def mimo_send_audio(text):
     if not audio_bytes:
         return None
 
-    mimetype = _audio_mimetype('audio/mpeg', audio_bytes)
+    # 让魔数判断真实格式（现在是 wav，不再假定音频是 mp3）
+    mimetype = _audio_mimetype('', audio_bytes)
     ext = mimetype.split('/')[-1].replace('mpeg', 'mp3')
     elapsed_ms = round((time.perf_counter() - started_at) * 1000)
     app.logger.info(
