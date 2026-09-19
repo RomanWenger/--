@@ -990,11 +990,11 @@ async function init() {
     if (status && status.textContent === '已到达') {
       status.title = '点击"AI语音讲解"或"播放演示"以启用语音'
     }
-    const voiceText = document.querySelector('#voice-toggle .voice-text')
-    if (voiceText && !aiGuide.voiceUnlocked) {
-      voiceText.textContent = '点击启用'
-    }
+    refreshVoiceText()
   }, 1500)
+
+  // 预加载进度显示到语音按钮上
+  aiGuide.onPreloadProgress = () => refreshVoiceText()
 
   // 页面就绪后立即开始预加载：3D 演示讲词优先，随后是阶段 0/20/50/100/200
   if (typeof aiGuide?.preloadCommonSpeeches === 'function') {
@@ -1002,7 +1002,36 @@ async function init() {
     aiGuide.preloadCommonSpeeches(keys.slice(0, 2)).then(() => {
       aiGuide.preloadCommonSpeeches(keys.slice(2))
     }).catch(() => {})
+    refreshVoiceText()
   }
+}
+
+// ===== 语音按钮文案 =====
+// 预加载期间显示"语音初始化中…"，播报中或刚点过开关的几秒内不覆盖。
+let voiceUiBusy = false
+let voiceHintHoldUntil = 0
+
+function setVoiceText(text) {
+  const voiceText = document.querySelector('#voice-toggle .voice-text')
+  if (voiceText) voiceText.textContent = text
+}
+
+function refreshVoiceText() {
+  if (voiceUiBusy || Date.now() < voiceHintHoldUntil) return
+
+  if (aiGuide?.preloadInFlight) {
+    const total = aiGuide.preloadTotal || 0
+    const done = aiGuide.preloadDone || 0
+    setVoiceText(total ? `语音初始化中 ${done}/${total}` : '语音初始化中…')
+    return
+  }
+
+  if (!aiGuide?.voiceUnlocked) {
+    setVoiceText('点击启用')
+    return
+  }
+
+  setVoiceText(aiGuide.voiceEnabled ? '已开启' : '已关闭')
 }
 
 function setupUI() {
@@ -1467,12 +1496,14 @@ function setupUI() {
         voiceToggle.classList.add('on')
         if (icon) icon.textContent = '🔊'
         if (text) text.textContent = '已开启'
+        voiceHintHoldUntil = Date.now() + 4000
       } else {
         aiGuide.stopSpeech()
         voiceToggle.classList.add('off')
         voiceToggle.classList.remove('on')
         if (icon) icon.textContent = '🔇'
         if (text) text.textContent = '已关闭'
+        voiceHintHoldUntil = Date.now() + 4000
       }
     })
   }
@@ -1480,6 +1511,7 @@ function setupUI() {
   // 语音播报状态回调：保证图标与文字完全同步
   aiGuide.onSpeechStart = (text) => {
     document.body.classList.add('ai-speaking')
+    voiceUiBusy = true
     if (voiceToggle) {
       voiceToggle.classList.remove('off')
       voiceToggle.classList.add('on')
@@ -1492,21 +1524,21 @@ function setupUI() {
 
   aiGuide.onSpeechEnd = (text, success) => {
     document.body.classList.remove('ai-speaking')
+    voiceUiBusy = false
     if (voiceToggle) {
       const icon = voiceToggle.querySelector('.voice-icon')
-      const voiceText = voiceToggle.querySelector('.voice-text')
       if (aiGuide.voiceEnabled) {
         voiceToggle.classList.remove('off')
         voiceToggle.classList.add('on')
         if (icon) icon.textContent = '🔊'
-        if (voiceText) voiceText.textContent = '已开启'
       } else {
         voiceToggle.classList.add('off')
         voiceToggle.classList.remove('on')
         if (icon) icon.textContent = '🔇'
-        if (voiceText) voiceText.textContent = '已关闭'
       }
     }
+    // 若语音还在预加载，这里会继续显示"语音初始化中…"
+    refreshVoiceText()
   }
 
   aiGuide.onSpeechError = (error) => {

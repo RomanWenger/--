@@ -52,6 +52,12 @@ export class AIGuide {
     this.onSpeechPlaying = null
     this._speechPlayingNotified = -1
 
+    // 预加载进度（供 UI 显示"语音初始化中…"）
+    this.onPreloadProgress = null
+    this.preloadInFlight = false
+    this.preloadDone = 0
+    this.preloadTotal = 0
+
     // 语速估算：MiMo 冰糖音色长讲解实测约 5.0 字/秒，用于给动画配速
     this.speechCharsPerSecond = 5.0
 
@@ -613,11 +619,14 @@ export class AIGuide {
 
     if (!pending.length) return
 
-    // 并发 2：既不把接口压垮，也让第一条（演示讲词）尽快就绪
-    console.log(`[TTS] 后台预加载 ${pending.length} 条常用语音（并发 2）...`)
+    // 并发 4：实测 6 条讲词总耗时从 24.7 秒降到 12.9 秒；再多收益有限，也怕把接口压垮
+    const concurrency = Math.min(4, pending.length)
+    this.preloadInFlight = true
+    this.preloadDone = 0
+    this.preloadTotal = pending.length
+    console.log(`[TTS] 后台预加载 ${pending.length} 条常用语音（并发 ${concurrency}）...`)
 
     let cursor = 0
-    let done = 0
 
     const worker = async () => {
       while (cursor < pending.length) {
@@ -627,8 +636,9 @@ export class AIGuide {
           const blob = await this._requestSpeechBlob(text)
           this._cacheAudioBlob(text, blob)
           if (blob) {
-            done += 1
-            console.log(`[TTS] 预加载就绪 ${done}/${pending.length}：「${text.slice(0, 12)}…」`)
+            this.preloadDone += 1
+            this.onPreloadProgress?.(this.preloadDone, this.preloadTotal)
+            console.log(`[TTS] 预加载就绪 ${this.preloadDone}/${this.preloadTotal}：「${text.slice(0, 12)}…」`)
           }
         } catch (error) {
           console.warn(`[TTS] 预加载失败：「${text.slice(0, 12)}…」`, error)
@@ -636,8 +646,13 @@ export class AIGuide {
       }
     }
 
-    await Promise.all([worker(), worker()])
-    console.log(`[TTS] 预加载结束：${done}/${pending.length} 条已进内存缓存`)
+    try {
+      await Promise.all(Array.from({ length: concurrency }, () => worker()))
+    } finally {
+      this.preloadInFlight = false
+      this.onPreloadProgress?.(this.preloadDone, this.preloadTotal)
+      console.log(`[TTS] 预加载结束：${this.preloadDone}/${this.preloadTotal} 条已进内存缓存`)
+    }
   }
 
   /**
