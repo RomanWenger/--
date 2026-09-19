@@ -1,0 +1,1754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>吉隆口岸泥石流救援AI仿真 · 物理科普平台</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      overflow: hidden;
+    }
+    #canvas-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 16px 24px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0) 100%);
+      z-index: 100;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #header .title-group h1 {
+      font-size: 22px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    #header .title-group .subtitle {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 2px;
+      letter-spacing: 2px;
+    }
+    #header .badges {
+      display: flex;
+      gap: 8px;
+    }
+    .badge {
+      padding: 6px 14px;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 20px;
+      font-size: 12px;
+      color: #38bdf8;
+      font-weight: 500;
+    }
+    .badge.green {
+      background: rgba(74, 222, 128, 0.1);
+      border-color: rgba(74, 222, 128, 0.3);
+      color: #4ade80;
+    }
+
+    #control-panel {
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      width: 320px;
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 16px;
+      padding: 16px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      z-index: 100;
+    }
+    #control-panel::-webkit-scrollbar {
+      width: 4px;
+    }
+    #control-panel::-webkit-scrollbar-track {
+      background: rgba(56, 189, 248, 0.05);
+      border-radius: 2px;
+    }
+    #control-panel::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.3);
+      border-radius: 2px;
+    }
+
+    .panel-section {
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(56, 189, 248, 0.1);
+    }
+    .panel-section:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #38bdf8;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title .icon {
+      font-size: 16px;
+    }
+
+    .control-group {
+      margin-bottom: 14px;
+    }
+    .control-group:last-child {
+      margin-bottom: 0;
+    }
+    .control-group label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .control-group .value-display {
+      color: #38bdf8;
+      font-weight: 700;
+      font-size: 14px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .slider {
+      width: 100%;
+      height: 6px;
+      -webkit-appearance: none;
+      background: rgba(56, 189, 248, 0.1);
+      border-radius: 3px;
+      outline: none;
+      cursor: pointer;
+    }
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+      transition: transform 0.2s;
+    }
+    .slider::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+    }
+
+    .voice-toggle {
+      padding: 4px 12px;
+      background: rgba(74, 222, 128, 0.1);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      border-radius: 16px;
+      color: #4ade80;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 500;
+    }
+    .voice-toggle:hover {
+      background: rgba(74, 222, 128, 0.2);
+      border-color: rgba(74, 222, 128, 0.5);
+    }
+    .voice-toggle.off {
+      background: rgba(100, 116, 139, 0.1);
+      border-color: rgba(100, 116, 139, 0.3);
+      color: #64748b;
+    }
+    .voice-toggle.off:hover {
+      background: rgba(100, 116, 139, 0.2);
+    }
+
+    .stage-buttons {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+    }
+    .stage-btn {
+      padding: 8px 4px;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 8px;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-align: center;
+    }
+    .stage-btn:hover {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.4);
+      color: #e2e8f0;
+    }
+    .stage-btn.active {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.3), rgba(14, 165, 233, 0.3));
+      border-color: #38bdf8;
+      color: #fff;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+    }
+    .stage-btn .ep-num {
+      font-weight: 700;
+      font-size: 14px;
+      display: block;
+    }
+    .stage-btn .ep-label {
+      font-size: 10px;
+      opacity: 0.8;
+    }
+
+    .play-btn {
+      width: 100%;
+      padding: 10px;
+      background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .play-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(56, 189, 248, 0.4);
+    }
+    .play-btn:active {
+      transform: translateY(0);
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .info-card {
+      background: rgba(56, 189, 248, 0.06);
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center;
+    }
+    .info-card .value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #4ade80;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .info-card .label {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .info-card.warning .value {
+      color: #fbbf24;
+    }
+    .info-card.danger .value {
+      color: #f87171;
+    }
+    .info-card.primary .value {
+      color: #38bdf8;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: rgba(74, 222, 128, 0.08);
+      border-radius: 8px;
+      margin-bottom: 14px;
+    }
+    .status-indicator .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+      box-shadow: 0 0 8px #4ade80;
+      animation: pulse 2s infinite;
+    }
+    .status-indicator .text {
+      font-size: 13px;
+      color: #4ade80;
+      font-weight: 500;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .stage-desc {
+      padding: 12px;
+      background: rgba(168, 85, 247, 0.08);
+      border-left: 3px solid #a855f7;
+      border-radius: 0 8px 8px 0;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #c4b5fd;
+      margin-top: 12px;
+    }
+    .stage-desc strong {
+      color: #a78bfa;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    /* 统一左侧理论区：实时参数 + 物理模型 + 操作指南 */
+    #left-theory-area {
+      position: fixed;
+      top: 118px;
+      left: 32px;
+      bottom: 24px;
+      z-index: 500;
+      width: 420px;
+      max-width: calc(100vw - 48px);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-bottom: 72px;
+      scrollbar-width: thin;
+      scrollbar-color: #2563eb rgba(15, 23, 42, 0.4);
+    }
+    #left-theory-area::-webkit-scrollbar {
+      width: 6px;
+    }
+    #left-theory-area::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.3);
+      border-radius: 3px;
+    }
+
+    .theory-card {
+      position: relative;
+      flex: 0 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid rgba(96, 165, 250, 0.22);
+      border-radius: 18px;
+      color: #dbeafe;
+      background: rgba(15, 23, 42, 0.94);
+      box-shadow: 0 12px 32px rgba(2, 6, 23, 0.28);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    .theory-card.is-closed {
+      display: none;
+    }
+    .theory-card-header {
+      position: relative;
+      min-height: 58px;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      padding: 14px 58px 12px 22px;
+    }
+    .theory-card-header h2 {
+      margin: 0;
+      color: #38bdf8;
+      font-size: 19px;
+      line-height: 1.3;
+    }
+    .theory-card-body {
+      padding: 0 22px 22px;
+    }
+    .card-close {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      z-index: 10;
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 50%;
+      color: #cbd5e1;
+      background: rgba(148, 163, 184, 0.2);
+      font-size: 25px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .card-close:hover {
+      color: #fff;
+      background: #dc2626;
+    }
+
+    /* 卡片重新打开按钮栏 */
+    #card-reopen-bar {
+      position: fixed;
+      left: 32px;
+      bottom: 24px;
+      z-index: 9998;
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-width: 480px;
+      pointer-events: none;
+    }
+    #card-reopen-bar button {
+      display: none;
+      min-width: auto;
+      padding: 6px 12px;
+      border: 1px solid rgba(96, 165, 250, 0.4);
+      border-radius: 20px;
+      color: #93c5fd;
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(10px);
+      font-size: 12px;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 9999;
+      transition: all 0.2s ease;
+    }
+    #card-reopen-bar.has-buttons button:not([hidden]) {
+      display: inline-flex;
+      align-items: center;
+    }
+    #card-reopen-bar button:hover {
+      color: #fff;
+      background: #2563eb;
+      border-color: #60a5fa;
+      transform: translateY(-2px);
+    }
+
+    /* AI agent 放在左侧理论区右边，顶端与"实时物理参数"卡片对齐 */
+    .ai-agent-layer {
+      position: fixed;
+      left: 536px;
+      top: 76px;
+      z-index: 450;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      pointer-events: none;
+    }
+    .ai-agent-container {
+      position: relative;
+      width: 190px;
+      height: 320px;
+      overflow: visible;
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      pointer-events: none;
+    }
+    .ai-agent-container canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+      background: transparent !important;
+    }
+    .ai-agent-layer .ai-agent-label {
+      margin-top: -24px;
+      color: #e0f2fe;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 700;
+      white-space: nowrap;
+      text-shadow: 0 2px 4px rgba(2, 6, 23, 0.95), 0 0 8px rgba(56, 189, 248, 0.45);
+    }
+
+    /* 物理知识弹窗打开时，AI 自动降到弹窗后面 */
+    body.kb-open .ai-agent-layer {
+      z-index: 100;
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    @media (max-width: 1200px) {
+      .ai-agent-layer {
+        left: auto;
+        right: 18px;
+        top: auto;
+        bottom: 18px;
+      }
+    }
+    @media (max-width: 800px) {
+      .ai-agent-container {
+        width: 130px;
+        height: 190px;
+      }
+      .ai-agent-layer .ai-agent-label {
+        font-size: 11px;
+      }
+    }
+
+
+
+    .knowledge-content {
+      font-size: 12px;
+      line-height: 1.7;
+      color: #cbd5e1;
+      overflow-y: auto;
+      flex: 1;
+      padding-right: 8px;
+    }
+    .knowledge-content::-webkit-scrollbar {
+      width: 3px;
+    }
+    .knowledge-content::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.3);
+      border-radius: 2px;
+    }
+    .knowledge-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .knowledge-tab {
+      flex: 1;
+      padding: 8px;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 8px;
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-align: center;
+    }
+    .knowledge-tab:hover {
+      background: rgba(56, 189, 248, 0.15);
+      color: #e2e8f0;
+    }
+    .knowledge-tab.active {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(14, 165, 233, 0.25));
+      border-color: #38bdf8;
+      color: #fff;
+    }
+    .knowledge-content h4 {
+      color: #38bdf8;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .knowledge-content .formula {
+      background: rgba(56, 189, 248, 0.1);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #7dd3fc;
+      margin: 8px 0;
+      border-left: 3px solid #38bdf8;
+    }
+    .knowledge-content ul {
+      padding-left: 18px;
+      margin: 8px 0;
+    }
+    .knowledge-content li {
+      margin-bottom: 6px;
+    }
+    .knowledge-content .highlight {
+      color: #fbbf24;
+      font-weight: 600;
+    }
+
+    #loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 1000;
+      text-align: center;
+    }
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 3px solid rgba(56, 189, 248, 0.2);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .loading-text {
+      color: #38bdf8;
+      font-size: 16px;
+    }
+
+    #chart-container {
+      margin-top: 12px;
+      padding: 10px;
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 8px;
+      border: 1px solid rgba(56, 189, 248, 0.15);
+    }
+    #learning-chart {
+      width: 100%;
+      height: 80px;
+    }
+
+    /* ===== 实时物理参数内容 ===== */
+    .physics-block {
+      margin-bottom: 14px;
+      padding: 10px;
+      background: rgba(56, 189, 248, 0.05);
+      border-radius: 10px;
+      border-left: 3px solid #38bdf8;
+    }
+    .physics-block.mechanics { border-left-color: #4fc3f7; }
+    .physics-block.fluid { border-left-color: #81d4fa; }
+    .physics-block.energy { border-left-color: #fbbf24; }
+    .physics-block-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #7dd3fc;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .physics-formula {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #fbbf24;
+      background: rgba(251, 191, 36, 0.08);
+      padding: 5px 8px;
+      border-radius: 5px;
+      margin: 4px 0;
+      text-align: center;
+    }
+    .physics-calc {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 4px;
+      line-height: 1.6;
+    }
+    .physics-calc .calc-result {
+      color: #4ade80;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .physics-stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin: 3px 0;
+    }
+    .physics-stat-row .label { color: #94a3b8; }
+    .physics-stat-row .value { color: #e2e8f0; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+    .physics-stat-row .value.up { color: #f87171; }
+    .physics-stat-row .value.down { color: #4ade80; }
+
+    /* ===== 动态知识卡片 ===== */
+    #knowledge-card {
+      position: fixed;
+      bottom: 200px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      z-index: 200;
+      background: rgba(10, 20, 50, 0.94);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 16px;
+      padding: 18px 28px;
+      max-width: 640px;
+      width: 90%;
+      color: #e8f0fe;
+      font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+      transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6), 0 0 60px rgba(56, 189, 248, 0.1);
+      opacity: 0;
+      pointer-events: none;
+    }
+    #knowledge-card.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .kc-tags {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .kc-tag {
+      padding: 3px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .kc-tag.discipline {
+      background: rgba(79, 195, 247, 0.18);
+      color: #4fc3f7;
+    }
+    .kc-tag.topic {
+      background: rgba(251, 191, 36, 0.15);
+      color: #fbbf24;
+    }
+    .kc-text {
+      font-size: 14px;
+      line-height: 1.7;
+      color: #e2e8f0;
+    }
+    .kc-formula-block {
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: rgba(56, 189, 248, 0.08);
+      border-radius: 8px;
+      border-left: 3px solid #38bdf8;
+    }
+    .kc-formula-label {
+      font-size: 11px;
+      color: #7dd3fc;
+      margin-bottom: 4px;
+    }
+    .kc-formula {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: #fbbf24;
+      font-weight: 600;
+    }
+    .kc-detail {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 8px;
+      line-height: 1.6;
+    }
+    .kc-close {
+      position: absolute;
+      top: 10px;
+      right: 14px;
+      background: none;
+      border: none;
+      color: #64748b;
+      font-size: 18px;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    .kc-close:hover { color: #f87171; }
+
+    /* ===== 知识库模态框 ===== */
+    #kb-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      z-index: 2000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    #kb-modal.active { display: flex; }
+    .kb-container {
+      width: 90%;
+      max-width: 900px;
+      max-height: 85vh;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 20px;
+      padding: 24px;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    }
+    .kb-container::-webkit-scrollbar { width: 6px; }
+    .kb-container::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.3); border-radius: 3px; }
+    .kb-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(56, 189, 248, 0.15);
+    }
+    .kb-header h2 {
+      font-size: 20px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 700;
+    }
+    .kb-close {
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      color: #f87171;
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .kb-close:hover { background: rgba(248, 113, 113, 0.2); }
+    .kb-disciplines {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .kb-discipline-card {
+      background: rgba(56, 189, 248, 0.05);
+      border: 1px solid rgba(56, 189, 248, 0.12);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .kb-discipline-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .kb-concept {
+      padding: 10px;
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .kb-concept:last-child { margin-bottom: 0; }
+    .kb-concept-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 4px;
+    }
+    .kb-concept-formula {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #fbbf24;
+      background: rgba(251, 191, 36, 0.08);
+      padding: 4px 8px;
+      border-radius: 5px;
+      margin: 5px 0;
+    }
+    .kb-concept-desc {
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+
+    /* ===== 地图容器 ===== */
+    #amap-container {
+      position: fixed;
+      top: 80px;
+      right: 360px;
+      width: 320px;
+      height: 260px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      z-index: 99;
+      display: none;
+    }
+    #amap-container.active { display: block; }
+    .amap-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(15, 23, 42, 0.85);
+      color: #38bdf8;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      z-index: 20;
+      backdrop-filter: blur(8px);
+      pointer-events: none;
+    }
+    .amap-close-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(248, 113, 113, 0.3);
+      border: 1px solid rgba(248, 113, 113, 0.6);
+      color: #f87171;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      transition: all 0.2s;
+      pointer-events: auto;
+    }
+    .amap-close-btn:hover { background: rgba(248, 113, 113, 0.5); }
+
+    /* ===== 浮动工具按钮 ===== */
+    #floating-tools {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 150;
+    }
+    .tool-btn {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(12px);
+      color: #38bdf8;
+      font-size: 22px;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+    .tool-btn:hover {
+      transform: translateY(-3px);
+      border-color: #38bdf8;
+      box-shadow: 0 6px 24px rgba(56, 189, 248, 0.3);
+    }
+    .tool-btn.active {
+      background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+      color: white;
+      border-color: transparent;
+    }
+    .tool-btn .tooltip {
+      position: absolute;
+      right: 60px;
+      background: rgba(15, 23, 42, 0.95);
+      color: #e2e8f0;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .tool-btn:hover .tooltip { opacity: 1; }
+
+    /* ===== 救援指挥中心主题升级 ===== */
+    :root {
+      --bg-deep: #06111f;
+      --bg-panel: rgba(10, 28, 49, 0.78);
+      --line-blue: rgba(125, 211, 252, 0.24);
+      --cyan: #67e8f9;
+      --blue: #38bdf8;
+      --orange: #fb923c;
+      --green: #4ade80;
+      --text-main: #e5f3ff;
+      --text-muted: #91a9bd;
+    }
+    .hero-title {
+      font-size: clamp(30px, 4vw, 58px);
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      background: linear-gradient(110deg, #e0f2fe, #67e8f9 48%, #93c5fd);
+      -webkit-background-clip: text;
+      color: transparent;
+    }
+    .eyebrow {
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+    }
+    .glass-btn {
+      padding: 10px 18px;
+      border: 1px solid var(--line-blue);
+      border-radius: 12px;
+      color: var(--text-main);
+      background: var(--bg-panel);
+      backdrop-filter: blur(18px);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .25s ease, box-shadow .25s ease;
+    }
+    .glass-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(56, 189, 248, .28);
+    }
+    .primary-action,
+    .lesson-next {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 20px;
+      color: #04111e;
+      background: linear-gradient(135deg, #67e8f9, #38bdf8);
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform .25s ease, box-shadow .25s ease;
+    }
+    .primary-action:hover,
+    .lesson-next:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(56, 189, 248, .28);
+    }
+    .lesson-option {
+      width: 100%;
+      margin: 6px 0;
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 13px;
+      border-radius: 10px;
+      color: var(--text-main);
+      background: rgba(15, 47, 75, .75);
+      border: 1px solid rgba(125, 211, 252, .2);
+      cursor: pointer;
+      transition: all .25s ease;
+    }
+    .lesson-option:hover:not(:disabled) {
+      border-color: var(--cyan);
+      background: rgba(14, 116, 144, .38);
+      transform: translateX(4px);
+    }
+    .lesson-feedback {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 12px;
+      line-height: 1.7;
+    }
+    .lesson-feedback.correct {
+      color: #bbf7d0;
+      background: rgba(22, 101, 52, .3);
+      border: 1px solid rgba(74, 222, 128, .35);
+    }
+    .lesson-feedback.wrong {
+      color: #fed7aa;
+      background: rgba(154, 52, 18, .3);
+      border: 1px solid rgba(251, 146, 60, .35);
+    }
+    .lesson-progress {
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      margin-bottom: 6px;
+    }
+    .lesson-question {
+      color: var(--text-main);
+      font-size: 14px;
+      line-height: 1.6;
+      margin: 8px 0 12px;
+    }
+    .lesson-complete {
+      color: var(--green);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+    .lesson-score {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--cyan);
+      margin: 8px 0;
+    }
+    .learning-message-box {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+      padding: 14px 16px;
+      color: #bae6fd;
+      background: rgba(8, 47, 73, .72);
+      border-left: 3px solid var(--cyan);
+      border-radius: 12px;
+      line-height: 1.6;
+    }
+    .learning-message-box .message-icon {
+      color: var(--cyan);
+      font-size: 14px;
+    }
+    .stage-tag {
+      display: inline-block;
+      margin-right: 10px;
+      padding: 4px 8px;
+      color: #fed7aa;
+      background: rgba(154, 52, 18, .45);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .knowledge-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 3000;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(2, 8, 23, .72);
+      backdrop-filter: blur(10px);
+    }
+    .knowledge-modal.hidden {
+      display: none;
+    }
+    .knowledge-modal-card {
+      position: relative;
+      max-width: 720px;
+      padding: 34px;
+      background: var(--bg-panel);
+      border: 1px solid var(--line-blue);
+      border-radius: 22px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(18px);
+      color: var(--text-main);
+    }
+    .modal-close {
+      position: absolute;
+      top: 16px;
+      right: 18px;
+      color: #cbd5e1;
+      background: transparent;
+      border: 0;
+      font-size: 28px;
+      cursor: pointer;
+    }
+    .modal-close:hover { color: #fff; }
+    .fact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .fact-grid > div {
+      padding: 12px 14px;
+      background: rgba(8, 47, 73, .55);
+      border: 1px solid var(--line-blue);
+      border-radius: 12px;
+    }
+    .fact-grid strong {
+      display: block;
+      color: var(--cyan);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+    .fact-grid span {
+      color: var(--text-main);
+      font-size: 14px;
+    }
+    .lesson-card {
+      position: relative;
+      background: var(--bg-panel);
+      border: 1px solid var(--line-blue);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(18px);
+      color: var(--text-main);
+      margin-bottom: 20px;
+    }
+    .lesson-subtitle {
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.6;
+      margin: 6px 0 14px;
+    }
+    .lesson-score-line {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+    .lesson-score-line strong {
+      color: var(--cyan);
+      font-size: 18px;
+      margin-left: 4px;
+    }
+    .interactive-lesson-panel {
+      margin-top: 14px;
+      padding: 16px;
+      background: rgba(8, 28, 49, .55);
+      border: 1px dashed var(--line-blue);
+      border-radius: 14px;
+      color: var(--text-muted);
+      font-size: 13px;
+      min-height: 80px;
+    }
+    .interactive-lesson-panel h3 {
+      color: var(--cyan);
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+    .lesson-card:not(.active) .interactive-lesson-panel {
+      opacity: 0.7;
+    }
+    /* 卡片关闭按钮 */
+    .card-close {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(125, 211, 252, .15);
+      color: var(--cyan);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 5;
+      transition: background .2s;
+    }
+    .card-close:hover { background: rgba(125, 211, 252, .32); }
+    .lesson-closed {
+      color: var(--text-muted);
+      font-size: 13px;
+      text-align: center;
+      padding: 12px 0;
+    }
+
+    /* 互动题目数据展示 */
+    .lesson-data {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 10px 0 14px;
+      padding: 12px;
+      background: rgba(8, 28, 49, .5);
+      border-radius: 10px;
+      font-size: 13px;
+    }
+    .lesson-data div { display: flex; justify-content: space-between; }
+    .lesson-data span { color: var(--text-muted); }
+    .lesson-data strong { color: var(--cyan); }
+    .lesson-plans {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 10px 0 14px;
+    }
+    .plan-card {
+      padding: 12px;
+      background: rgba(8, 28, 49, .5);
+      border: 1px solid var(--line-blue);
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.9;
+    }
+    .plan-card .plan-name {
+      color: var(--cyan);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .plan-card strong { color: var(--accent-orange); }
+    .lesson-formula {
+      margin: 10px 0 14px;
+      padding: 14px;
+      background: rgba(8, 28, 49, .5);
+      border-radius: 10px;
+      text-align: center;
+    }
+    .lesson-formula .formula-title {
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .lesson-formula .formula-body {
+      font-size: 18px;
+      color: var(--cyan);
+      font-weight: 700;
+      letter-spacing: .5px;
+    }
+    .lesson-formula .formula-note {
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    /* 救援方案弹窗 */
+    .rescue-plan-intro {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+    .plan-summary {
+      background: rgba(8, 28, 49, .55);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .plan-status {
+      display: inline-block;
+      padding: 4px 14px;
+      border-radius: 20px;
+      background: rgba(74, 222, 128, .15);
+      color: #4ade80;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .plan-status.danger {
+      background: rgba(239, 68, 68, .15);
+      color: #f87171;
+    }
+    .plan-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .plan-grid div {
+      padding: 8px 10px;
+      background: rgba(5, 20, 35, .5);
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    .plan-grid span { color: var(--text-muted); display: block; }
+    .plan-grid strong { color: var(--cyan); font-size: 16px; }
+    .plan-steps {
+      padding-left: 20px;
+      line-height: 2;
+      color: var(--text-main);
+      font-size: 14px;
+    }
+    .plan-steps li { margin-bottom: 4px; }
+
+    /* ===== 泥石流图例 ===== */
+    .hazard-legend {
+      position: absolute;
+      left: 28px;
+      bottom: 28px;
+      z-index: 20;
+      padding: 14px 16px;
+      color: #dbeafe;
+      background: rgba(5, 20, 35, .8);
+      border: 1px solid rgba(125, 211, 252, .22);
+      border-radius: 14px;
+      backdrop-filter: blur(12px);
+      font-size: 12px;
+      line-height: 2;
+      pointer-events: none;
+    }
+    .hazard-legend .legend-title {
+      color: #67e8f9;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      margin-bottom: 6px;
+    }
+    .legend-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 8px;
+      border-radius: 50%;
+      vertical-align: middle;
+    }
+    .legend-dot.flow { background: #4a1f12; }
+    .legend-dot.rock { background: #5b4637; }
+    .legend-dot.deposit { background: #d97706; }
+    .legend-dot.path { background: #67e8f9; }
+
+    /* ===== 泥石流观测知识卡片 ===== */
+    .debris-knowledge-card {
+      position: absolute;
+      right: 28px;
+      bottom: 28px;
+      z-index: 20;
+      width: 280px;
+      padding: 18px 20px;
+      color: #e5f3ff;
+      background: rgba(5, 20, 35, .82);
+      border: 1px solid rgba(125, 211, 252, .22);
+      border-radius: 16px;
+      backdrop-filter: blur(14px);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+      pointer-events: none;
+    }
+    .debris-knowledge-card .knowledge-label {
+      color: #67e8f9;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      margin-bottom: 4px;
+    }
+    .debris-knowledge-card h3 {
+      color: #e5f3ff;
+      font-size: 16px;
+      margin: 4px 0 8px;
+    }
+    .debris-knowledge-card p {
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 1.65;
+      margin: 0 0 10px;
+    }
+    .debris-knowledge-card .knowledge-value {
+      color: #94a3b8;
+      font-size: 12px;
+    }
+    .debris-knowledge-card .knowledge-value strong {
+      color: #fbbf24;
+      font-size: 14px;
+      margin-left: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <div class="title-group">
+      <h1>🌋 吉隆口岸泥石流救援AI仿真</h1>
+      <div class="subtitle">JILONG PORT · DEBRIS FLOW RESCUE × REINFORCEMENT LEARNING</div>
+    </div>
+    <div class="badges">
+      <span class="badge">🎯 DQN算法</span>
+      <span class="badge green">🧠 强化学习</span>
+      <span class="badge">💧 泥石流物理</span>
+    </div>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <div id="control-panel">
+    <div class="panel-section">
+      <div class="section-title">
+        <span class="icon">🎮</span> 环境参数
+      </div>
+      <div class="control-group">
+        <label>
+          <span>💧 泥石流流动强度</span>
+          <span class="value-display" id="wind-value">0.50</span>
+        </label>
+        <input type="range" class="slider" id="wind-slider" min="0" max="1" step="0.05" value="0.5">
+      </div>
+      <div class="control-group">
+        <label>
+          <span>⛰️ 地形起伏</span>
+          <span class="value-display" id="amplitude-value">1.00</span>
+        </label>
+        <input type="range" class="slider" id="amplitude-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+      </div>
+      <div class="control-group">
+        <label>
+          <span>🔊 AI语音讲解</span>
+          <button class="voice-toggle off" id="voice-toggle">
+            <span class="voice-icon">🔇</span>
+            <span class="voice-text">点击启用</span>
+          </button>
+        </label>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">
+        <span class="icon">🧠</span> AI训练阶段
+      </div>
+      <div class="stage-buttons" id="stage-buttons">
+        <button class="stage-btn" data-episode="0">
+          <span class="ep-num">0</span>
+          <span class="ep-label">空投</span>
+        </button>
+        <button class="stage-btn" data-episode="20">
+          <span class="ep-num">20</span>
+          <span class="ep-label">认知</span>
+        </button>
+        <button class="stage-btn" data-episode="50">
+          <span class="ep-num">50</span>
+          <span class="ep-label">规律</span>
+        </button>
+        <button class="stage-btn" data-episode="100">
+          <span class="ep-num">100</span>
+          <span class="ep-label">熟练</span>
+        </button>
+        <button class="stage-btn active" data-episode="200">
+          <span class="ep-num">200</span>
+          <span class="ep-label">专家</span>
+        </button>
+      </div>
+      <button class="play-btn" id="play-btn">
+        ▶️ 一键演示 AI 进化（全部阶段）
+      </button>
+      <div class="stage-desc" id="stage-desc">
+        <strong>🏆 专家级吉隆救援路径</strong>
+        200轮训练完成！AI完全收敛，用最小机械能消耗找到最快抵达被困人员的路线
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">
+        <span class="icon">🔄</span> 学习回放
+      </div>
+      <button class="play-btn" id="retrain-btn" style="margin-bottom:8px">
+        🧠 重新训练并回放（200 回合）
+      </button>
+      <div class="training-panel" id="training-panel" style="display:none">
+        <div class="info-grid" style="grid-template-columns:1fr 1fr;gap:6px">
+          <div class="info-card"><div class="value" id="tp-episode">--</div><div class="label">回合</div></div>
+          <div class="info-card"><div class="value" id="tp-step">--</div><div class="label">步数</div></div>
+          <div class="info-card"><div class="value" id="tp-epsilon">--</div><div class="label">探索率 ε</div></div>
+          <div class="info-card"><div class="value" id="tp-reward">--</div><div class="label">奖励</div></div>
+          <div class="info-card"><div class="value" id="tp-slope">--</div><div class="label">坡度风险</div></div>
+          <div class="info-card"><div class="value" id="tp-debris">--</div><div class="label">泥石流风险</div></div>
+        </div>
+        <div class="stage-desc" id="tp-note" style="margin-top:6px">
+          点击"重新训练"观看 AI 探索—碰壁—调整—收敛的过程。
+        </div>
+        <div class="learning-message-box" id="learning-message-box">
+          <span class="message-icon">◉</span>
+          <span id="learning-message">
+            AI 正在等待训练开始……
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">
+        <span class="icon">📊</span> 实时数据
+      </div>
+      <div class="info-grid">
+        <div class="info-card primary">
+          <div class="value" id="cost-value">--</div>
+          <div class="label">路径总代价</div>
+        </div>
+        <div class="info-card">
+          <div class="value" id="steps-value">--</div>
+          <div class="label">路径步数</div>
+        </div>
+        <div class="info-card warning">
+          <div class="value" id="episode-value">200</div>
+          <div class="label">训练轮次</div>
+        </div>
+        <div class="info-card">
+          <div class="value" id="status-value">--</div>
+          <div class="label">AI状态</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">
+        <span class="icon">📈</span> 学习曲线
+      </div>
+      <div id="chart-container">
+        <canvas id="learning-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div id="left-theory-area" class="left-theory-area">
+
+    <!-- 实时物理参数 -->
+    <section id="physics-params-card" class="theory-card">
+      <header class="theory-card-header">
+        <h2>⚙️ 实时物理参数</h2>
+        <button type="button" class="card-close" data-close-card="physics-params-card" aria-label="关闭实时物理参数">×</button>
+      </header>
+      <div class="theory-card-body">
+        <div id="physics-content">
+          <div class="physics-calc" style="color:#64748b;">等待路径规划完成...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 泥石流理论模型 + AI原理 -->
+    <section id="physics-model-card" class="theory-card">
+      <header class="theory-card-header">
+        <h2>🎓 吉隆口岸泥石流救援物理模型</h2>
+        <button type="button" class="card-close" data-close-card="physics-model-card" aria-label="关闭物理理论">×</button>
+      </header>
+      <div class="theory-card-body">
+        <div class="knowledge-tabs">
+          <button class="knowledge-tab active" data-tab="physics">🌋 泥石流物理</button>
+          <button class="knowledge-tab" data-tab="ai">🤖 AI原理</button>
+        </div>
+        <div class="knowledge-content" id="knowledge-content">
+          <h4>🌋 吉隆口岸泥石流救援物理模型</h4>
+          <p>2026年8月26日吉隆口岸泥石流爆发，救援机器人需要在峡谷地形与流动泥浆中自主规划路径。两种核心物理代价：</p>
+          <ul>
+            <li><span class="highlight">爬坡机械能</span>：上坡需克服重力做功 W=mgΔh</li>
+            <li><span class="highlight">泥石流冲力</span>：横切泥石流方向走，泥浆冲力代价极大</li>
+          </ul>
+          <div class="formula">总代价 = 基础距离 + 坡度惩罚 + 泥石流冲力惩罚</div>
+          <p>AI通过强化学习，在探索中逐渐理解这些物理规律，最终找到电池续航最优的救援路径！</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 操作指南 -->
+    <section id="operation-guide-card" class="theory-card operation-guide-card">
+      <header class="theory-card-header">
+        <h2>🎯 操作指南</h2>
+        <button type="button" class="card-close" data-close-card="operation-guide-card" aria-label="关闭操作指南">×</button>
+      </header>
+      <div class="theory-card-body">
+        <ul>
+          <li><span class="highlight">泥石流流动强度</span>：调节泥浆流动强度，观察AI如何调整路径</li>
+          <li><span class="highlight">地形起伏</span>：改变山的陡峭程度，影响坡度代价</li>
+          <li><span class="highlight">训练阶段</span>：切换不同训练时期的AI表现</li>
+          <li><span class="highlight">播放探索策略演示</span>：逐阶段演示不同探索率下的路径规划</li>
+        </ul>
+        <p style="margin-top:10px;"><strong>3D场景操作：</strong></p>
+        <ul>
+          <li>鼠标左键拖动：旋转视角</li>
+          <li>鼠标滚轮：缩放视图</li>
+          <li>鼠标右键拖动：平移画面</li>
+        </ul>
+        <p style="margin-top:10px; color:#94a3b8;">💡 提示：试试把泥石流强度调到最大，然后切换不同训练阶段，观察AI如何学会绕开泥石流沟！</p>
+      </div>
+    </section>
+
+    <!-- 救援决策实验室（互动科普）—— 接入统一 theory-card 关闭/打开机制 -->
+    <section class="lesson-card theory-card" id="lesson-section">
+      <button type="button" class="card-close" data-close-card="lesson-section" aria-label="关闭救援决策实验室">×</button>
+      <div class="eyebrow">INTERACTIVE SCIENCE</div>
+      <h2 style="font-size:18px;margin:4px 0 6px;color:var(--text-main);">🧪 救援决策实验室</h2>
+      <p class="lesson-subtitle">
+        先做出判断，再观察仿真结果，理解物理规律如何影响 AI 决策。
+      </p>
+
+      <div class="lesson-score-line">
+        当前得分：<strong id="lesson-score-value">0</strong>
+      </div>
+
+      <button id="start-lesson-btn" class="primary-action" style="width:100%;">
+        开始互动科普
+      </button>
+
+      <div id="interactive-lesson-panel" class="interactive-lesson-panel">
+        点击上方按钮开始学习
+      </div>
+    </section>
+
+  </div>
+
+  <!-- 关闭后的重新打开按钮（统一 data-open-card 机制） -->
+  <div id="card-reopen-bar" class="card-reopen-bar">
+    <button type="button" data-open-card="physics-params-card">📊 实时参数</button>
+    <button type="button" data-open-card="physics-model-card">🎓 物理模型</button>
+    <button type="button" data-open-card="operation-guide-card">🎯 操作指南</button>
+    <button type="button" data-open-card="lesson-section">🧪 救援决策实验室</button>
+  </div>
+
+  <div id="knowledge-card">
+    <button class="kc-close" id="kc-close">×</button>
+    <div class="kc-tags">
+      <span class="kc-tag discipline" id="kc-discipline">📐 力学</span>
+      <span class="kc-tag topic" id="kc-topic">⛰️ 坡度阻力</span>
+    </div>
+    <div class="kc-text" id="kc-text"></div>
+    <div class="kc-formula-block">
+      <div class="kc-formula-label" id="kc-formula-label">核心公式</div>
+      <div class="kc-formula" id="kc-formula"></div>
+    </div>
+    <div class="kc-detail" id="kc-detail"></div>
+  </div>
+
+  <div id="kb-modal">
+    <div class="kb-container">
+      <div class="kb-header">
+        <h2>📚 物理知识库 · 公式词典</h2>
+        <button class="kb-close" id="kb-close-btn">关闭 ✕</button>
+      </div>
+      <div class="kb-disciplines" id="kb-disciplines"></div>
+    </div>
+  </div>
+
+  <div id="amap-container">
+    <div class="amap-overlay">📍 吉隆口岸真实地理位置</div>
+    <button class="amap-close-btn" id="amap-close-btn">×</button>
+  </div>
+
+  <div id="floating-tools">
+    <button class="tool-btn" id="kb-btn" title="物理知识库">
+      📚
+      <span class="tooltip">物理知识库</span>
+    </button>
+    <button class="tool-btn" id="map-btn" title="真实地图">
+      🗺️
+      <span class="tooltip">真实地图</span>
+    </button>
+    <button class="tool-btn" id="card-btn" title="知识卡片">
+      💡
+      <span class="tooltip">知识卡片</span>
+    </button>
+    <button class="tool-btn" id="rescue-plan-btn" title="生成救援方案" style="font-size:18px">
+      ◫
+      <span class="tooltip">生成救援方案</span>
+    </button>
+  </div>
+
+  <!-- 救援方案弹窗：分阶段战术详情 + 3D 地图聚焦联动 -->
+  <div id="rescue-plan-modal" class="knowledge-modal hidden">
+    <div class="knowledge-modal-card rescue-plan-card" style="max-width: 680px; padding: 28px;">
+      <button id="close-rescue-plan-modal" class="modal-close" aria-label="关闭救援方案">×</button>
+      <div class="eyebrow" style="color: #38bdf8;">TACTICAL RESCUE OPERATION</div>
+      <h2 style="font-size: 22px; margin: 4px 0 12px; color: #f8fafc;">吉隆口岸应急救援推演方案</h2>
+
+      <!-- 方案实时战术指标 -->
+      <div id="rescue-plan-metrics" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;"></div>
+
+      <!-- 方案三阶段战术步骤 -->
+      <div id="rescue-plan-steps" style="display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto;"></div>
+
+      <div style="display: flex; gap: 12px; margin-top: 20px;">
+        <button id="play-3d-plan-btn" class="primary-action" style="flex: 1;">🎬 在 3D 地图上演示全程战术走位</button>
+        <button id="regenerate-plan-btn" class="glass-btn" style="width: 140px;">🔄 重新生成方案</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 泥石流图例（移到右下角，避免被左下角按钮遮挡） -->
+  <div class="hazard-legend" id="hazard-legend" style="position:fixed; right:28px; bottom:180px; left:auto; z-index:90;">
+    <div class="legend-title">泥石流图例</div>
+    <div><span class="legend-dot flow" style="background:#854d0e;"></span>流动泥浆流带</div>
+    <div><span class="legend-dot rock" style="background:#52525b;"></span>滚动巨石</div>
+    <div><span class="legend-dot deposit" style="background:#b45309;"></span>泥砂堆积扇</div>
+    <div><span class="legend-dot path" style="background:#38bdf8;"></span>AI 规划路径</div>
+  </div>
+
+  <!-- 泥石流观测知识卡片（右下角） -->
+  <div id="debris-knowledge-card" class="debris-knowledge-card">
+    <div class="knowledge-label">泥石流观测</div>
+    <h3 id="debris-knowledge-title">沿沟道运动</h3>
+    <p id="debris-knowledge-text">
+      泥石流受重力作用，通常沿沟谷和低洼通道向下游运动。
+    </p>
+    <div class="knowledge-value">
+      当前风险：<strong id="debris-risk-value">中等</strong>
+    </div>
+  </div>
+
+  <!-- AI agent 独立前置图层：永远在最前，高于物理弹窗 -->
+  <div id="ai-agent-layer" class="ai-agent-layer">
+    <div id="ai-agent-container" class="ai-agent-container"></div>
+    <div class="ai-agent-label">AI 救援教练</div>
+  </div>
+
+  <div id="loading">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">正在初始化吉隆口岸泥石流仿真场景...</div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

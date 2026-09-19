@@ -1,0 +1,34 @@
+# ===== 依赖与虚拟环境（不要提交）=====
+node_modules/
+.venv/
+.venv-cpu/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# ===== 编辑器 / IDE =====
+.idea/
+.vscode/
+*.iml
+
+# ===== 构建产物 =====
+dist/
+build/
+out/
+electron/dist/
+frontend/dist/
+
+# ===== 密钥与本地配置（绝对不能提交）=====
+.env
+backend/.env
+backend/tts_local_config.py
+
+# ===== 大文件归档 / 模型权重 / 压缩包 =====
+archive/
+*.pth
+*.ckpt
+*.onnx
+*.zip
+*.7z
+*.log
