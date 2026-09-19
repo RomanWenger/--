@@ -1514,6 +1514,21 @@ def doubao_text_to_speech_sentence():
     )
 
 
+@app.route('/api/tts-config', methods=['GET'])
+def tts_config():
+    """
+    返回当前 TTS 配置。前端用它拼缓存键：配置（音色/模型/风格/格式）一变，
+    缓存键就变，浏览器缓存自然失效，不会播到旧音色的音频。
+    """
+    return jsonify({
+        'provider': 'mimo',
+        'voice': MIMO_TTS_VOICE,
+        'model': MIMO_TTS_MODEL,
+        'style': MIMO_TTS_STYLE,
+        'format': MIMO_TTS_FORMAT
+    })
+
+
 @app.route('/api/tts-stream', methods=['GET'])
 def doubao_text_to_speech_stream():
     """
@@ -1528,7 +1543,9 @@ def doubao_text_to_speech_stream():
     # 主链路：小米 MiMo（整段返回 mp3）；不可用时自动回退豆包
     mimo_response = mimo_send_audio(text)
     if mimo_response is not None:
-        mimo_response.headers['Cache-Control'] = 'no-cache'
+        # 同一段文本的音频是确定的，允许浏览器缓存：
+        # 刷新页面时直接命中本地缓存，不用再等合成
+        mimo_response.headers['Cache-Control'] = 'public, max-age=604800'
         mimo_response.headers['X-Accel-Buffering'] = 'no'
         return mimo_response
 

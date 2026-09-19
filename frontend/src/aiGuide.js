@@ -27,6 +27,8 @@ export class AIGuide {
     this.ttsStreamUrl = '/api/tts-stream'
     this._streamFirstChunkTimeout = 5000   // 流式端点多久没起播就切兜底
     this._ttsWarmed = false
+    this._pinnedSpeech = new Set()   // 预加载过的讲词，缓存淘汰时跳过
+    this._ttsConfigKey = ''          // 供浏览器缓存拼键：配置变了缓存自动失效
     this._ttsController = null
 
     // 短句队列：流式端点不可用时逐句合成，边播边取（低延迟兜底）
@@ -599,13 +601,17 @@ export class AIGuide {
   /**
    * 写入音频缓存池，超过上限时淘汰最早的条目（Blob 占内存，必须限量）
    */
-  _cacheAudioBlob(text, blob) {
+  _cacheAudioBlob(text, blob, { pin = false } = {}) {
     if (!text || !blob) return
     this._audioBlobCache.set(text, blob)
+    if (pin) this._pinnedSpeech.add(text)
+
+    // 超出上限时淘汰最早的，但不动"钉住"的（初始化预加载的那些讲词）
     while (this._audioBlobCache.size > 12) {
-      const oldest = this._audioBlobCache.keys().next().value
-      if (oldest === text) break
-      this._audioBlobCache.delete(oldest)
+      const victim = [...this._audioBlobCache.keys()]
+        .find(key => key !== text && !this._pinnedSpeech.has(key))
+      if (!victim) break
+      this._audioBlobCache.delete(victim)
     }
   }
 
@@ -633,8 +639,8 @@ export class AIGuide {
         const text = pending[cursor]
         cursor += 1
         try {
-          const blob = await this._requestSpeechBlob(text)
-          this._cacheAudioBlob(text, blob)
+          const blob = await this._fetchSpeechForPreload(text)
+          this._cacheAudioBlob(text, blob, { pin: true })
           if (blob) {
             this.preloadDone += 1
             this.onPreloadProgress?.(this.preloadDone, this.preloadTotal)
@@ -653,6 +659,61 @@ export class AIGuide {
       this.onPreloadProgress?.(this.preloadDone, this.preloadTotal)
       console.log(`[TTS] 预加载结束：${this.preloadDone}/${this.preloadTotal} 条已进内存缓存`)
     }
+  }
+
+  /**
+   * 取当前 TTS 配置键（音色/模型/风格/格式）。用于拼浏览器缓存键：
+   * 配置一变键就变，不会播到旧音色的缓存音频。
+   */
+  async _getTtsConfigKey() {
+    if (this._ttsConfigKey) return this._ttsConfigKey
+    try {
+      const response = await fetch('/api/tts-config')
+      if (response.ok) {
+        const cfg = await response.json()
+        this._ttsConfigKey = [cfg.provider, cfg.voice, cfg.model, cfg.style, cfg.format]
+          .filter(Boolean).join('|')
+      }
+    } catch (e) { /* 忽略，退回默认键 */ }
+    if (!this._ttsConfigKey) this._ttsConfigKey = 'default'
+    return this._ttsConfigKey
+  }
+
+  /**
+   * 预加载专用取音：走 GET /api/tts-stream（带配置键），
+   * 命中浏览器缓存时几乎瞬间返回；失败再退回 POST 兜底。
+   */
+  async _fetchSpeechForPreload(text) {
+    try {
+      const key = await this._getTtsConfigKey()
+      const url = `${this.ttsStreamUrl}?text=${encodeURIComponent(text)}&v=${encodeURIComponent(key)}`
+      const response = await fetch(url)
+      if (response.ok) {
+        const blob = await response.blob()
+        if (blob?.size) return blob
+      }
+    } catch (e) { /* 忽略，走兜底 */ }
+    return await this._requestSpeechBlob(text)
+  }
+
+  /**
+   * 确保某段讲词已经在缓存里（3D 演示等场景，避免现场合成导致开头仓促）。
+   * 已有立即返回 true；没有则等待，最多等 timeoutMs。
+   */
+  async ensureSpeechCached(message, timeoutMs = 4000) {
+    const text = String(message ?? '').trim()
+    if (!text) return false
+    if (this._audioBlobCache.has(text)) return true
+
+    if (!this._prefetchingMap.has(text)) this.prefetchSpeech(text)
+    const task = this._prefetchingMap.get(text)
+    if (!task) return false
+
+    const blob = await Promise.race([
+      task,
+      new Promise(resolve => setTimeout(() => resolve(null), timeoutMs))
+    ])
+    return Boolean(blob)
   }
 
   /**
@@ -867,6 +928,15 @@ export class AIGuide {
       this._finishSpeech = finish
       audio.onended = () => finish(true)
       audio.onerror = () => finish(false)
+
+      // 主线程繁忙时，浏览器偶发从中途开始播（听感就是"开头被吞"）。
+      // 检测到起播位置异常就拉回开头重播，宁可重复一点也不吞字。
+      audio.onplaying = () => {
+        if (audio.currentTime > 0.3) {
+          console.warn('[TTS] 起播位置异常，回到开头:', audio.currentTime.toFixed(2), 's')
+          try { audio.currentTime = 0 } catch (e) { /* 忽略 */ }
+        }
+      }
 
       audio.play().then(() => {
         this._notifySpeechPlaying(version)
@@ -1166,7 +1236,9 @@ export class AIGuide {
           console.log('[TTS] 首句开始播放:', Math.round(performance.now() - startedAt), 'ms')
         }
 
-        const startAt = Math.max(ctx.currentTime + 0.03, scheduledUntil)
+        // 第一句多留一点排程余量，避免主线程繁忙时起播位置被跳过
+        const leadIn = index === 0 ? 0.12 : 0.03
+        const startAt = Math.max(ctx.currentTime + leadIn, scheduledUntil)
         source.start(startAt)
         scheduledUntil = startAt + buffer.duration / rate
         sources.push(source)

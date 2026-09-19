@@ -45,9 +45,11 @@ const TRAINING_MODES = Object.freeze({
 async function prepareVoice() {
   if (!aiGuide) return false
   const ok = await aiGuide.unlockVoice()
-  const voiceText = document.querySelector('#voice-toggle .voice-text')
-  if (voiceText) {
-    voiceText.textContent = ok ? '已开启' : '启用失败'
+  if (ok) {
+    refreshVoiceUi()
+  } else {
+    const voiceText = document.querySelector('#voice-toggle .voice-text')
+    if (voiceText) voiceText.textContent = '启用失败'
   }
   return ok
 }
@@ -852,6 +854,18 @@ function updateDebrisKnowledge(hazard) {
 async function init() {
   try {
     loading.style.display = 'none'
+
+    // 语音预加载不依赖 3D 场景，尽早开始：3D 模型加载要好几秒，不能白等
+    aiGuide = new AIGuide()
+    aiGuide.onPreloadProgress = () => refreshVoiceUi()
+    if (typeof aiGuide.preloadCommonSpeeches === 'function') {
+      const speechList = buildPreloadSpeechList()
+      aiGuide.preloadCommonSpeeches(speechList.slice(0, 2)).then(() => {
+        aiGuide.preloadCommonSpeeches(speechList.slice(2))
+      }).catch(() => {})
+      refreshVoiceUi()
+    }
+
     sceneManager = new SceneManager(container)
     Object.values(routeLayers).forEach(layer => sceneManager.add(layer))
     showOnlyRouteLayer('plan')
@@ -886,7 +900,6 @@ async function init() {
     })
     windParticles = new DebrisFlow(8, 1.8, glbTerrain)
     pathVisualizer = new PathVisualizer(8, 1.8, glbTerrain)
-    aiGuide = new AIGuide()
 
     // 相机：拉远以容纳高山，target 放在低处河谷（不要盯着山壁中间）
     sceneManager.camera.position.set(30, 22, 34)
@@ -1026,20 +1039,9 @@ async function init() {
     if (status && status.textContent === '已到达') {
       status.title = '点击"AI语音讲解"或"播放演示"以启用语音'
     }
-    refreshVoiceText()
+    refreshVoiceUi()
   }, 1500)
 
-  // 预加载进度显示到语音按钮上
-  aiGuide.onPreloadProgress = () => refreshVoiceText()
-
-  // 页面就绪后立即开始预加载：3D 演示讲词优先，随后是阶段 0/20/50/100/200
-  if (typeof aiGuide?.preloadCommonSpeeches === 'function') {
-    const keys = buildPreloadSpeechList()
-    aiGuide.preloadCommonSpeeches(keys.slice(0, 2)).then(() => {
-      aiGuide.preloadCommonSpeeches(keys.slice(2))
-    }).catch(() => {})
-    refreshVoiceText()
-  }
 }
 
 // ===== 语音按钮文案 =====
@@ -1047,27 +1049,44 @@ async function init() {
 let voiceUiBusy = false
 let voiceHintHoldUntil = 0
 
-function setVoiceText(text) {
-  const voiceText = document.querySelector('#voice-toggle .voice-text')
-  if (voiceText) voiceText.textContent = text
-}
+/**
+ * 语音按钮的图标与文字统一在这里刷新，避免出现"文字已开启、图标还是静音"这类不一致。
+ * 文字在预加载时显示进度、播报中显示"播放中"；图标始终跟随语音开关状态。
+ */
+function refreshVoiceUi() {
+  const voiceToggle = document.getElementById('voice-toggle')
+  if (!voiceToggle) return
 
-function refreshVoiceText() {
-  if (voiceUiBusy || Date.now() < voiceHintHoldUntil) return
+  const icon = voiceToggle.querySelector('.voice-icon')
+  const voiceText = voiceToggle.querySelector('.voice-text')
+  const enabled = Boolean(aiGuide?.voiceEnabled)
+
+  voiceToggle.classList.toggle('off', !enabled)
+  voiceToggle.classList.toggle('on', enabled)
+  if (icon) icon.textContent = enabled ? '🔊' : '🔇'
+
+  if (!voiceText) return
+
+  if (voiceUiBusy) {
+    voiceText.textContent = '播放中'
+    return
+  }
+
+  if (Date.now() < voiceHintHoldUntil) return
 
   if (aiGuide?.preloadInFlight) {
     const total = aiGuide.preloadTotal || 0
     const done = aiGuide.preloadDone || 0
-    setVoiceText(total ? `语音初始化中 ${done}/${total}` : '语音初始化中…')
+    voiceText.textContent = total ? `语音初始化中 ${done}/${total}` : '语音初始化中…'
     return
   }
 
   if (!aiGuide?.voiceUnlocked) {
-    setVoiceText('点击启用')
+    voiceText.textContent = '点击启用'
     return
   }
 
-  setVoiceText(aiGuide.voiceEnabled ? '已开启' : '已关闭')
+  voiceText.textContent = enabled ? '已开启' : '已关闭'
 }
 
 function setupUI() {
@@ -1186,6 +1205,9 @@ function setupUI() {
             if (nextMsg) aiGuide.prefetchSpeech?.(nextMsg)
           }
           await voiceReady
+          // 确保这一阶段的语音已经合成好（预加载过就是瞬时的），
+          // 避免临时合成导致开口仓促、吞字
+          await aiGuide.ensureSpeechCached?.(msg, 6000)
           // 当前阶段的路径、文字和语音必须保持同一阶段，等云端语音播报完成后再切换。
           await aiGuide.say(msg, 0, true).catch(error => {
             console.warn('阶段语音播放失败:', error)
@@ -1540,24 +1562,16 @@ function setupUI() {
   if (voiceToggle) {
     voiceToggle.addEventListener('click', async () => {
       const enabled = aiGuide.toggleVoice()
-      const icon = voiceToggle.querySelector('.voice-icon')
-      const text = voiceToggle.querySelector('.voice-text')
+
+      voiceHintHoldUntil = Date.now() + 4000
 
       if (enabled) {
         await aiGuide.unlockVoice()
-        voiceToggle.classList.remove('off')
-        voiceToggle.classList.add('on')
-        if (icon) icon.textContent = '🔊'
-        if (text) text.textContent = '已开启'
-        voiceHintHoldUntil = Date.now() + 4000
+        aiGuide.warmUpTTS?.()
       } else {
         aiGuide.stopSpeech()
-        voiceToggle.classList.add('off')
-        voiceToggle.classList.remove('on')
-        if (icon) icon.textContent = '🔇'
-        if (text) text.textContent = '已关闭'
-        voiceHintHoldUntil = Date.now() + 4000
       }
+      refreshVoiceUi()
     })
   }
 
@@ -1565,33 +1579,14 @@ function setupUI() {
   aiGuide.onSpeechStart = (text) => {
     document.body.classList.add('ai-speaking')
     voiceUiBusy = true
-    if (voiceToggle) {
-      voiceToggle.classList.remove('off')
-      voiceToggle.classList.add('on')
-      const icon = voiceToggle.querySelector('.voice-icon')
-      const voiceText = voiceToggle.querySelector('.voice-text')
-      if (icon) icon.textContent = '🔊'
-      if (voiceText) voiceText.textContent = '播放中'
-    }
+    refreshVoiceUi()
   }
 
   aiGuide.onSpeechEnd = (text, success) => {
     document.body.classList.remove('ai-speaking')
     voiceUiBusy = false
-    if (voiceToggle) {
-      const icon = voiceToggle.querySelector('.voice-icon')
-      if (aiGuide.voiceEnabled) {
-        voiceToggle.classList.remove('off')
-        voiceToggle.classList.add('on')
-        if (icon) icon.textContent = '🔊'
-      } else {
-        voiceToggle.classList.add('off')
-        voiceToggle.classList.remove('on')
-        if (icon) icon.textContent = '🔇'
-      }
-    }
     // 若语音还在预加载，这里会继续显示"语音初始化中…"
-    refreshVoiceText()
+    refreshVoiceUi()
   }
 
   aiGuide.onSpeechError = (error) => {
