@@ -927,6 +927,58 @@ export class AIGuide {
   }
 
   /**
+   * 把 16 位 PCM WAV 手工解析成 AudioBuffer。
+   *
+   * 为什么不用 decodeAudioData：部分 Windows 机器上它会直接把渲染进程搞崩
+   * （实测：解码后端返回的 wav 时渲染进程崩溃，整页白掉）。wav 是逐样本的
+   * 简单容器，自己解析又快又不会碰到那条会崩的原生解码路径。
+   * 非 16 位 PCM（例如 mp3）会抛错，交给调用方回退到 <audio> 元素播放。
+   */
+  _decodeWavPcm(arrayBuffer, ctx) {
+    const dv = new DataView(arrayBuffer)
+    if (arrayBuffer.byteLength < 44) throw new Error('音频太短，不是完整 WAV')
+    const four = (o) => String.fromCharCode(dv.getUint8(o), dv.getUint8(o + 1), dv.getUint8(o + 2), dv.getUint8(o + 3))
+    if (four(0) !== 'RIFF' || four(8) !== 'WAVE') throw new Error('不是 WAV 数据')
+
+    let offset = 12
+    let fmt = null
+    let dataOffset = -1
+    let dataLength = 0
+    while (offset + 8 <= dv.byteLength) {
+      const id = four(offset)
+      const size = dv.getUint32(offset + 4, true)
+      if (id === 'fmt ') {
+        fmt = {
+          format: dv.getUint16(offset + 8, true),
+          channels: dv.getUint16(offset + 10, true),
+          sampleRate: dv.getUint32(offset + 12, true),
+          bits: dv.getUint16(offset + 22, true)
+        }
+      } else if (id === 'data') {
+        dataOffset = offset + 8
+        dataLength = Math.min(size, dv.byteLength - dataOffset)
+        break
+      }
+      offset += 8 + size + (size % 2)
+    }
+    if (!fmt || dataOffset < 0) throw new Error('WAV 缺少 fmt/data 块')
+    if (fmt.format !== 1 || fmt.bits !== 16) {
+      throw new Error('只支持 16 位 PCM WAV（format=' + fmt.format + ', bits=' + fmt.bits + '）')
+    }
+
+    const channels = Math.max(1, fmt.channels)
+    const frames = Math.max(1, Math.floor(dataLength / 2 / channels))
+    const buffer = ctx.createBuffer(channels, frames, fmt.sampleRate || 24000)
+    for (let c = 0; c < channels; c += 1) {
+      const out = buffer.getChannelData(c)
+      for (let i = 0; i < frames; i += 1) {
+        out[i] = dv.getInt16(dataOffset + (i * channels + c) * 2, true) / 32768
+      }
+    }
+    return buffer
+  }
+
+  /**
    * 用 Web Audio 播放一段已解码的音频（开头带留白），播完才 resolve。
    */
   _playBufferWithLeadIn(audioBuffer, version, leadSeconds = 0) {
@@ -984,7 +1036,8 @@ export class AIGuide {
       try {
         const arrayBuffer = await blob.arrayBuffer()
         if (version !== this._queueVersion) return false
-        const decoded = await this._audioContext.decodeAudioData(arrayBuffer.slice(0))
+        // 手工解析，避免 decodeAudioData 在部分机器上崩溃（详见 _decodeWavPcm）
+        const decoded = this._decodeWavPcm(arrayBuffer.slice(0), this._audioContext)
         if (version !== this._queueVersion) return false
         return await this._playBufferWithLeadIn(decoded, version, this.speechLeadInSeconds)
       } catch (error) {
@@ -1336,8 +1389,13 @@ export class AIGuide {
 
         let buffer = null
         try {
-          buffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+          // 同样走手工解析，避免 decodeAudioData 崩溃
+          buffer = this._decodeWavPcm(arrayBuffer.slice(0), ctx)
         } catch (error) {
+          // 不是 16 位 PCM（例如 mp3）：退回 <audio> 元素播这一句，至少还能出声
+          const played = await this._playBlobAudio(new Blob([arrayBuffer], { type: 'audio/wav' }), version)
+          if (version !== this._queueVersion) return false
+          if (played) continue
           skipped += 1
           console.warn('[TTS] 这一句解码失败，跳过继续:', error)
           continue
