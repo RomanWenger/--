@@ -87,10 +87,32 @@ function createWindow() {
     width: 1600,
     height: 1000,
     title: '吉隆口岸泥石流救援仿真系统',
+    // 先不显示，等页面首帧画好再显示，避免用户看到一片空白的窗口；
+    // 底色也用界面同款的深色，万一首帧来得慢也不会闪白
+    show: false,
+    backgroundColor: '#0f172a',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       devTools: true
+    }
+  })
+
+  // 页面首帧就绪后显示窗口；8 秒保险，避免极端情况下窗口一直不出现
+  mainWindow.once('ready-to-show', () => mainWindow.show())
+  const fallbackShow = setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show()
+    }
+  }, 8000)
+
+  // 渲染进程万一崩溃（比如显卡驱动抽风导致白屏），自动重新加载一次页面
+  let crashReloads = 0
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error('渲染进程异常退出:', details && details.reason)
+    if (crashReloads < 2 && mainWindow && !mainWindow.isDestroyed()) {
+      crashReloads += 1
+      mainWindow.reload()
     }
   })
 
@@ -114,6 +136,7 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    clearTimeout(fallbackShow)
     mainWindow = null
   })
 
