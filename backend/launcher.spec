@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('dqn_model.pth', '.'), ('dem_kyirong.npy', '.'), ('environment.py', '.'), ('hazard.py', '.'), ('model.py', '.'), ('.env', '.')]
+datas = [('dqn_model.pth', '.'), ('dem_kyirong.npy', '.'), ('environment.py', '.'), ('hazard.py', '.'), ('model.py', '.'), ('.env', '.'), ('tts_local_config.py', '.')]
 binaries = []
 hiddenimports = ['dotenv']
 tmp_ret = collect_all('torch')

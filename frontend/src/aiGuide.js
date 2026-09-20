@@ -23,8 +23,14 @@ export class AIGuide {
     this._speechBusy = false
     this._isPlaying = false
 
-    this.ttsUrl = '/api/tts'
-    this.ttsStreamUrl = '/api/tts-stream'
+    // 打包后（Electron）页面跑在 file:// 协议下，相对路径 /api 会解析失败，
+    // 这种情况直连本机 Flask；开发时仍走 Vite 代理
+    const apiBase = (window.location.protocol === 'file:' || window.location.port === '')
+      ? 'http://127.0.0.1:5000'
+      : ''
+    this.ttsUrl = `${apiBase}/api/tts`
+    this.ttsStreamUrl = `${apiBase}/api/tts-stream`
+    this.ttsConfigUrl = `${apiBase}/api/tts-config`
     this._streamFirstChunkTimeout = 5000   // 流式端点多久没起播就切兜底
     this._ttsWarmed = false
     this._pinnedSpeech = new Set()   // 预加载过的讲词，缓存淘汰时跳过
@@ -672,7 +678,7 @@ export class AIGuide {
   async _getTtsConfigKey() {
     if (this._ttsConfigKey) return this._ttsConfigKey
     try {
-      const response = await fetch('/api/tts-config')
+      const response = await fetch(this.ttsConfigUrl)
       if (response.ok) {
         const cfg = await response.json()
         this._ttsConfigKey = [cfg.provider, cfg.voice, cfg.model, cfg.style, cfg.format]
