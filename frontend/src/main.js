@@ -1849,22 +1849,32 @@ function getTacticalMetrics() {
     53.9
   )
 
-  // 冲沟横切步数：优先读取物理数据，若后端未返回则根据路径实际穿过冲沟区域（X/Z 危险区域）进行实际步数统计
-  let crossSteps = finiteNumber(
+  // 冲沟横切步数：直接用后端算出的真实值。
+  // 0 是有效结果——代表全程没有横切冲沟的走法（算法主动规避的结果），
+  // 不能再用"按路径中段估算"把它盖成十几步，否则界面数字会和实验报告对不上。
+  let crossSteps = null
+  for (const candidate of [
     physics.cross_channel_steps,
     physics.cross_flow_steps,
     physics.channel_cross_steps
-  )
-
-  if (crossSteps === 0 && path.length > 0) {
-    // 冲沟区域特征判定：通常位于路径中段（约 30%~70% 区间），统计实际穿越步数
-    const midStart = Math.floor(path.length * 0.3)
-    const midEnd = Math.floor(path.length * 0.7)
-    crossSteps = Math.max(1, midEnd - midStart)
+  ]) {
+    if (candidate !== undefined && candidate !== null && Number.isFinite(Number(candidate))) {
+      crossSteps = Number(candidate)
+      break
+    }
   }
 
-  // 机械做功
+  if (crossSteps === null) {
+    // 只有后端完全没返回该字段时（老接口）才退化为按路径长度估算
+    const midStart = Math.floor(path.length * 0.3)
+    const midEnd = Math.floor(path.length * 0.7)
+    crossSteps = path.length > 0 ? Math.max(1, midEnd - midStart) : 0
+  }
+
+  // 机械做功：用"总机械做功"（爬坡 + 对抗泥石流 + 泥浆黏滞耗散），
+  // 与实验报告里"机械做功/kJ"同一口径；后端没给总量时才退回爬坡做功
   const climbWork = finiteNumber(
+    physics.total_mechanical_cost_kj,
     physics.climb_work_kj,
     physics.slope_work_kj,
     physics.total_work,
@@ -1901,7 +1911,7 @@ function buildTacticalStageDescs() {
     '从吉隆口岸前指出发，避开主沟直冲面，沿山谷东侧等高线低坡推进，保持机械能耗最低。',
     crossSteps > 0
       ? `前方泥石流流动强度 ${risk.toFixed(2)}，选择沟道收窄且流速较慢的基岩带快速横穿，切忌逆流停留。`
-      : '当前冲沟流势较缓，保持匀速横切，注意避让滚石区。',
+      : '当前路径不横切冲沟：沿等高线绕行、避开泥浆主冲沟的冲击区，稳步推进。',
     '穿越冲沟后切入被困人员所在安全阶地，建立临时生命支持与撤离锚点，完成救援闭环。'
   ]
 }
