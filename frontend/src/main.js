@@ -5,7 +5,7 @@ import { GLBTerrain } from './glbTerrain.js'
 import { DebrisFlow } from './debrisFlow.js'  // 泥石流流场系统
 import { PathVisualizer } from './path.js'
 import { AIGuide } from './aiGuide.js'
-import { getTerrain, getPath, checkHealth, getLearningCurve, getHazard, trainModel, startTraining, getTrainingProgress, stopTraining, getTrainingHistory, getTrainingSnapshot, getTrainingSnapshots } from './api.js'
+import { API_BASE, getTerrain, getPath, checkHealth, getLearningCurve, getHazard, trainModel, startTraining, getTrainingProgress, stopTraining, getTrainingHistory, getTrainingSnapshot, getTrainingSnapshots } from './api.js'
 import { TrainingReplay } from './trainingReplay.js'
 import { physicsKnowledgeBase, getKnowledgeCard, calcPhysicsState } from './physicsKnowledge.js'
 import { initAmap, destroyAmap } from './amap.js'
@@ -938,7 +938,7 @@ async function init() {
       // 1. 导出 GLB 真实 DEM 给后端，危险场基于同一张地形计算
       try {
         const dem = glbTerrain.exportDEM(20)
-        await fetch('/api/dem', {
+        await fetch(`${API_BASE}/dem`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dem })

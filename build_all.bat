@@ -33,12 +33,20 @@ if not exist "%~dp0electron\node_modules" (
   goto :fail
 )
 
-tasklist /FI "IMAGENAME eq 吉隆口岸泥石流救援仿真系统.exe" 2>nul | findstr /i /c:"吉隆口岸" >nul
+rem ---------- 检查 release-final 是否被占用 ----------
+set "LOCKTMP=%TEMP%\rescue_build_lock.txt"
+if exist "%LOCKTMP%" del "%LOCKTMP%" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Process -Name '吉隆口岸泥石流救援仿真系统' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.ToLower().StartsWith('%~dp0release-final'.ToLower()) } | ForEach-Object { 'LOCKED' }" > "%LOCKTMP%" 2>nul
+findstr /c:"LOCKED" "%LOCKTMP%" >nul 2>nul
 if not errorlevel 1 (
-  echo [错误] 检测到已安装的版本正在运行，请先退出该程序，
-  echo        否则 release-final 里的文件被占用会导致打包失败。
+  del "%LOCKTMP%" >nul 2>nul
+  echo [错误] release-final 目录里的程序正在运行，文件被占用会导致打包失败。
+  echo        请先退出该程序后再重新运行本脚本。
+  echo        （安装在其它目录的版本在运行不影响打包，可以忽略本提示。）
   goto :fail
 )
+del "%LOCKTMP%" >nul 2>nul
+if not exist "%~dp0release-final" md "%~dp0release-final" >nul 2>nul
 
 rem ---------- 1/3 前端构建 ----------
 set /a STEP+=1

@@ -97,8 +97,10 @@ function createWindow() {
   if (isPackaged) {
     const frontendDir = path.join(process.resourcesPath, 'frontend-dist')
     mainWindow.loadFile(path.join(frontendDir, 'index.html'))
-    // 打包后也打开 DevTools 便于调试，稳定后可注释掉
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
+    // 默认不打开开发者工具；需要调试时用环境变量 RESCUE_DEVTOOLS=1 启动
+    if (process.env.RESCUE_DEVTOOLS === '1') {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
   } else {
     const distPath = path.join(__dirname, '..', 'frontend', 'dist', 'index.html')
     if (fs.existsSync(distPath)) {
@@ -106,7 +108,9 @@ function createWindow() {
     } else {
       mainWindow.loadURL('http://localhost:3000/')
     }
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
+    if (process.env.RESCUE_DEVTOOLS === '1') {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
   }
 
   mainWindow.on('closed', () => {

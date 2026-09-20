@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 // 开发时走 Vite proxy(/api → :5000)，打包后直连 Flask
-const API_BASE = window.location.protocol === 'file:' || window.location.port === ''
+export const API_BASE = window.location.protocol === 'file:' || window.location.port === ''
   ? 'http://127.0.0.1:5000/api'
   : '/api'
 
